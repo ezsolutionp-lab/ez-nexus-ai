@@ -1,0 +1,40 @@
+# EZ-NEXUS AI — Backend Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.1
+python-multipart>=0.0.9
+
+# Database ORM
+sqlalchemy>=2.0.30
+alembic>=1.13.1
+psycopg2-binary>=2.9.9
+
+# Data validation (2.10+ has Python 3.14 wheels)
+pydantic[email]>=2.10.0
+pydantic-settings>=2.5.0
+
+# Environment variables
+python-dotenv>=1.0.1
+
+# HTTP client
+httpx>=0.27.0
+
+# AI integrations
+anthropic>=0.40.0
+# openai>=1.30.0   # optional OpenAI fallback
+
+# Twilio — real phone calls + SMS
+twilio>=9.0.0
+
+# Natural language date parsing (for AI phone booking)
+python-dateutil>=2.9.0
+
+# Auth — JWT + password hashing (using bcrypt directly, passlib has Py3.14 issues)
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+
+# Testing
+pytest>=8.2.2
+pytest-asyncio>=0.23.7
