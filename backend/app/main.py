@@ -22,13 +22,18 @@ Endpoints:
   WS   /ws/{client_id}            Real-time notification stream
 """
 
+import json
 import logging
+import os
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from .database import engine, get_db, SessionLocal
@@ -720,3 +725,603 @@ def list_call_logs(
     if business_id:
         q = q.filter(models.CallLog.business_id == business_id)
     return q.order_by(models.CallLog.created_at.desc()).offset(skip).limit(limit).all()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA ENTRY AI MODULE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ensure_upload_dir() -> Path:
+    p = Path(settings.upload_dir)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _save_audit(db: Session, actor: str, action: str, entity_type: str,
+                entity_id: str, after: dict, before: dict = None, business_id: int = None):
+    if not settings.audit_log_enabled:
+        return
+    try:
+        db.add(models.AuditLog(
+            business_id=business_id,
+            actor=actor,
+            action=action,
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            before_data=json.dumps(before) if before else None,
+            after_data=json.dumps(after) if after else None,
+        ))
+    except Exception as e:
+        logger.error("Audit log save failed: %s", e)
+
+
+# ── Document Upload & AI Processing ──────────────────────────────────────────
+
+@app.post("/data-entry/upload", tags=["data_entry"])
+async def upload_document_for_data_entry(
+    business_id: int = Form(...),
+    patient_id:  Optional[int] = Form(None),
+    workflow_type: str = Form("medical"),   # medical | bookkeeping | insurance | equipment
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a document (PDF, scan, Word, Excel, CSV, image) for AI data extraction.
+    Commander AI supervises the full pipeline and returns an admin-approval package.
+    RULE: No data is posted to production records without admin approval.
+    """
+    if not db.get(models.Business, business_id):
+        raise HTTPException(status_code=404, detail="Business not found.")
+
+    # Validate file size
+    file.file.seek(0, 2)
+    size_bytes = file.file.tell()
+    file.file.seek(0)
+    if size_bytes > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File exceeds {settings.max_upload_mb}MB limit.")
+
+    # Save file to disk
+    upload_dir = _ensure_upload_dir()
+    suffix = Path(file.filename or "upload").suffix or ".bin"
+    safe_name = f"{uuid.uuid4().hex}{suffix}"
+    storage_path = upload_dir / safe_name
+
+    with storage_path.open("wb") as buf:
+        shutil.copyfileobj(file.file, buf)
+
+    # Extract text
+    from .services.document_processor import DocumentProcessor
+    processor = DocumentProcessor()
+    text, confidence = processor.extract_text(str(storage_path), file.content_type)
+    doc_type = DocumentProcessor.classify_document_type(file.filename or "", text)
+
+    # Save document record
+    doc = models.UploadedDocument(
+        business_id=business_id,
+        patient_id=patient_id,
+        filename=file.filename or safe_name,
+        content_type=file.content_type,
+        storage_path=str(storage_path),
+        document_type=doc_type,
+        extracted_text=text,
+        confidence_score=confidence,
+        extraction_status="completed" if text else "needs_review",
+        file_size_kb=size_bytes // 1024,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    # Commander AI pipeline
+    from .commander import process_document_data_entry
+    result = await process_document_data_entry(
+        text=text,
+        filename=file.filename or safe_name,
+        workflow_type=workflow_type,
+        db=db,
+        business_id=business_id,
+    )
+
+    # Save data entry job
+    job = models.DataEntryJob(
+        business_id=business_id,
+        document_id=doc.id,
+        job_type=workflow_type,
+        status="pending_admin_approval",
+        extracted_fields=json.dumps(result.get("extraction", {}).get("fields") or result.get("extraction", {}).get("entry") or {}),
+        missing_fields=json.dumps(result.get("verification", {}).get("missing_required", [])),
+        validation_errors=json.dumps(result.get("verification", {}).get("validation_errors", [])),
+        commander_recommendations=json.dumps(result.get("commander_recommendations", [])),
+        created_by_agent="ez_nexus_commander_ai",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    _save_audit(db, "commander_ai", "data_entry_job_created", "DataEntryJob",
+                job.id, result, business_id=business_id)
+    db.commit()
+
+    return {
+        "document_id": doc.id,
+        "job_id":      job.id,
+        "document_type": doc_type,
+        "confidence_score": confidence,
+        "commander_result": result,
+        "requires_admin_approval": True,
+        "message": "Document processed. Awaiting admin approval before data is posted.",
+    }
+
+
+# ── Data Entry Job Management ─────────────────────────────────────────────────
+
+@app.get("/data-entry/jobs", response_model=List[schemas.DataEntryJobOut], tags=["data_entry"])
+def list_data_entry_jobs(
+    business_id:  Optional[int] = None,
+    status:       Optional[str] = None,
+    job_type:     Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.DataEntryJob)
+    if business_id:
+        q = q.filter(models.DataEntryJob.business_id == business_id)
+    if status:
+        q = q.filter(models.DataEntryJob.status == status)
+    if job_type:
+        q = q.filter(models.DataEntryJob.job_type == job_type)
+    return q.order_by(models.DataEntryJob.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/data-entry/jobs/{job_id}", tags=["data_entry"])
+def get_data_entry_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(models.DataEntryJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {
+        **schemas.DataEntryJobOut.model_validate(job).model_dump(),
+        "extracted_fields_parsed":  json.loads(job.extracted_fields or "{}"),
+        "missing_fields_parsed":    json.loads(job.missing_fields or "[]"),
+        "validation_errors_parsed": json.loads(job.validation_errors or "[]"),
+        "recommendations_parsed":   json.loads(job.commander_recommendations or "[]"),
+    }
+
+
+@app.post("/data-entry/jobs/{job_id}/approve", tags=["data_entry"])
+def approve_data_entry_job(
+    job_id: int,
+    payload: schemas.DataEntryApproveRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    """Admin approves a data entry job — marks it ready to post to production."""
+    job = db.get(models.DataEntryJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    before = {"status": job.status, "admin_approved": job.admin_approved}
+    job.admin_approved = True
+    job.status = "approved_ready_to_post"
+    job.approval_notes = payload.admin_notes
+    _save_audit(db, admin.email, "data_entry_job_approved", "DataEntryJob",
+                job_id, {"status": job.status}, before, job.business_id)
+    db.commit()
+    return {"status": "approved", "job_id": job.id, "message": "Job approved and ready to post."}
+
+
+@app.post("/data-entry/jobs/{job_id}/decline", tags=["data_entry"])
+def decline_data_entry_job(
+    job_id: int,
+    payload: schemas.DataEntryDeclineRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    """Admin declines — sends job back for revision."""
+    job = db.get(models.DataEntryJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    before = {"status": job.status}
+    job.status = "declined_needs_revision"
+    job.approval_notes = payload.reason
+    job.admin_approved = False
+    _save_audit(db, admin.email, "data_entry_job_declined", "DataEntryJob",
+                job_id, {"status": job.status, "reason": payload.reason}, before, job.business_id)
+    db.commit()
+    return {"status": "declined", "job_id": job.id, "reason": payload.reason}
+
+
+# ── Document listing ──────────────────────────────────────────────────────────
+
+@app.get("/data-entry/documents", response_model=List[schemas.UploadedDocumentOut], tags=["data_entry"])
+def list_documents(
+    business_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.UploadedDocument)
+    if business_id:
+        q = q.filter(models.UploadedDocument.business_id == business_id)
+    return q.order_by(models.UploadedDocument.created_at.desc()).offset(skip).limit(limit).all()
+
+
+# ── Excel / CSV Export ────────────────────────────────────────────────────────
+
+@app.post("/data-entry/export/patient-excel", tags=["data_entry"])
+def export_patient_excel(
+    business_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    """Export all approved patient data entry jobs to Excel workbook."""
+    jobs = db.query(models.DataEntryJob).filter(
+        models.DataEntryJob.business_id == business_id,
+        models.DataEntryJob.admin_approved == True,
+        models.DataEntryJob.job_type.in_(["medical", "insurance"]),
+    ).all()
+
+    rows = []
+    for job in jobs:
+        try:
+            fields = json.loads(job.extracted_fields or "{}")
+            rows.append({**fields, "status": job.status, "notes": job.approval_notes or ""})
+        except Exception:
+            pass
+
+    upload_dir = _ensure_upload_dir()
+    output = str(upload_dir / f"patient_export_{business_id}_{uuid.uuid4().hex[:6]}.xlsx")
+
+    from .services.spreadsheet_service import SpreadsheetService
+    SpreadsheetService().create_patient_workbook(rows, output)
+    _save_audit(db, admin.email, "patient_excel_exported", "DataEntryJob",
+                business_id, {"rows": len(rows)}, business_id=business_id)
+    db.commit()
+    return FileResponse(output, filename=Path(output).name,
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.post("/data-entry/export/bookkeeping-excel", tags=["data_entry"])
+def export_bookkeeping_excel(
+    business_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    """Export all approved bookkeeping entries to Excel workbook."""
+    entries = db.query(models.BookkeepingEntry).filter(
+        models.BookkeepingEntry.business_id == business_id,
+        models.BookkeepingEntry.admin_approved == True,
+    ).all()
+
+    rows = [schemas.BookkeepingEntryOut.model_validate(e).model_dump() for e in entries]
+    upload_dir = _ensure_upload_dir()
+    output = str(upload_dir / f"bookkeeping_{business_id}_{uuid.uuid4().hex[:6]}.xlsx")
+
+    from .services.spreadsheet_service import SpreadsheetService
+    SpreadsheetService().create_bookkeeping_workbook(rows, output)
+    _save_audit(db, admin.email, "bookkeeping_excel_exported", "BookkeepingEntry",
+                business_id, {"rows": len(rows)}, business_id=business_id)
+    db.commit()
+    return FileResponse(output, filename=Path(output).name,
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.post("/data-entry/export/quickbooks-csv", tags=["data_entry"])
+def export_quickbooks_csv(business_id: int, db: Session = Depends(get_db)):
+    """Export approved bookkeeping entries as QuickBooks-compatible CSV."""
+    entries = db.query(models.BookkeepingEntry).filter(
+        models.BookkeepingEntry.business_id == business_id,
+        models.BookkeepingEntry.admin_approved == True,
+    ).all()
+    rows = [schemas.BookkeepingEntryOut.model_validate(e).model_dump() for e in entries]
+    upload_dir = _ensure_upload_dir()
+    output = str(upload_dir / f"quickbooks_{business_id}.csv")
+
+    from .services.spreadsheet_service import SpreadsheetService
+    SpreadsheetService().create_quickbooks_template(rows, output)
+    return FileResponse(output, filename=Path(output).name, media_type="text/csv")
+
+
+# ── Patients ──────────────────────────────────────────────────────────────────
+
+@app.post("/patients", response_model=schemas.PatientOut, status_code=201, tags=["patients"])
+def create_patient(payload: schemas.PatientCreate, db: Session = Depends(get_db)):
+    if not db.get(models.Business, payload.business_id):
+        raise HTTPException(status_code=404, detail="Business not found.")
+    patient = models.Patient(**payload.model_dump())
+    db.add(patient)
+    db.commit()
+    db.refresh(patient)
+    return patient
+
+
+@app.get("/patients", response_model=List[schemas.PatientOut], tags=["patients"])
+def list_patients(
+    business_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Patient)
+    if business_id:
+        q = q.filter(models.Patient.business_id == business_id)
+    return q.order_by(models.Patient.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/patients/{patient_id}", response_model=schemas.PatientOut, tags=["patients"])
+def get_patient(patient_id: int, db: Session = Depends(get_db)):
+    p = db.get(models.Patient, patient_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    return p
+
+
+@app.put("/patients/{patient_id}", response_model=schemas.PatientOut, tags=["patients"])
+def update_patient(patient_id: int, payload: schemas.PatientUpdate, db: Session = Depends(get_db)):
+    p = db.get(models.Patient, patient_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(p, field, value)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@app.delete("/patients/{patient_id}", tags=["patients"])
+def delete_patient(patient_id: int, db: Session = Depends(get_db),
+                   admin: models.User = Depends(get_admin_user)):
+    p = db.get(models.Patient, patient_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    db.delete(p)
+    db.commit()
+    return {"detail": f"Patient {patient_id} deleted."}
+
+
+# ── Insurance Profiles ────────────────────────────────────────────────────────
+
+@app.post("/patients/{patient_id}/insurance", response_model=schemas.InsuranceProfileOut,
+          status_code=201, tags=["patients"])
+def create_insurance_profile(
+    patient_id: int,
+    payload: schemas.InsuranceProfileCreate,
+    db: Session = Depends(get_db),
+):
+    if not db.get(models.Patient, patient_id):
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    profile = models.InsuranceProfile(**{**payload.model_dump(), "patient_id": patient_id})
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@app.get("/patients/{patient_id}/insurance", response_model=List[schemas.InsuranceProfileOut],
+         tags=["patients"])
+def list_insurance_profiles(patient_id: int, db: Session = Depends(get_db)):
+    if not db.get(models.Patient, patient_id):
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    return db.query(models.InsuranceProfile).filter(
+        models.InsuranceProfile.patient_id == patient_id
+    ).all()
+
+
+@app.put("/patients/{patient_id}/insurance/{profile_id}",
+         response_model=schemas.InsuranceProfileOut, tags=["patients"])
+def update_insurance_profile(
+    patient_id: int,
+    profile_id: int,
+    payload: schemas.InsuranceProfileUpdate,
+    db: Session = Depends(get_db),
+):
+    profile = db.query(models.InsuranceProfile).filter(
+        models.InsuranceProfile.id == profile_id,
+        models.InsuranceProfile.patient_id == patient_id,
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Insurance profile not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(profile, field, value)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+# ── Equipment Requests ────────────────────────────────────────────────────────
+
+@app.post("/equipment-requests", response_model=schemas.EquipmentRequestOut,
+          status_code=201, tags=["equipment"])
+def create_equipment_request(payload: schemas.EquipmentRequestCreate, db: Session = Depends(get_db)):
+    if not db.get(models.Business, payload.business_id):
+        raise HTTPException(status_code=404, detail="Business not found.")
+    req = models.EquipmentRequest(**payload.model_dump())
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+@app.get("/equipment-requests", response_model=List[schemas.EquipmentRequestOut], tags=["equipment"])
+def list_equipment_requests(
+    business_id:  Optional[int] = None,
+    patient_id:   Optional[int] = None,
+    status:       Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EquipmentRequest)
+    if business_id:
+        q = q.filter(models.EquipmentRequest.business_id == business_id)
+    if patient_id:
+        q = q.filter(models.EquipmentRequest.patient_id == patient_id)
+    if status:
+        q = q.filter(models.EquipmentRequest.status == status)
+    return q.order_by(models.EquipmentRequest.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/equipment-requests/{req_id}", response_model=schemas.EquipmentRequestOut, tags=["equipment"])
+def update_equipment_request(req_id: int, payload: schemas.EquipmentRequestUpdate,
+                              db: Session = Depends(get_db)):
+    req = db.get(models.EquipmentRequest, req_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Equipment request not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(req, field, value)
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+# ── Bookkeeping Entries ───────────────────────────────────────────────────────
+
+@app.post("/bookkeeping", response_model=schemas.BookkeepingEntryOut,
+          status_code=201, tags=["bookkeeping"])
+def create_bookkeeping_entry(payload: schemas.BookkeepingEntryCreate, db: Session = Depends(get_db)):
+    if not db.get(models.Business, payload.business_id):
+        raise HTTPException(status_code=404, detail="Business not found.")
+    entry = models.BookkeepingEntry(**payload.model_dump())
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.get("/bookkeeping", response_model=List[schemas.BookkeepingEntryOut], tags=["bookkeeping"])
+def list_bookkeeping_entries(
+    business_id: Optional[int] = None,
+    status:      Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.BookkeepingEntry)
+    if business_id:
+        q = q.filter(models.BookkeepingEntry.business_id == business_id)
+    if status:
+        q = q.filter(models.BookkeepingEntry.status == status)
+    return q.order_by(models.BookkeepingEntry.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/bookkeeping/{entry_id}", response_model=schemas.BookkeepingEntryOut, tags=["bookkeeping"])
+def update_bookkeeping_entry(entry_id: int, payload: schemas.BookkeepingEntryUpdate,
+                              db: Session = Depends(get_db)):
+    entry = db.get(models.BookkeepingEntry, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(entry, field, value)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@app.post("/bookkeeping/{entry_id}/approve", tags=["bookkeeping"])
+def approve_bookkeeping_entry(entry_id: int, db: Session = Depends(get_db),
+                               admin: models.User = Depends(get_admin_user)):
+    entry = db.get(models.BookkeepingEntry, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found.")
+    entry.admin_approved = True
+    entry.status = "approved"
+    _save_audit(db, admin.email, "bookkeeping_entry_approved", "BookkeepingEntry",
+                entry_id, {"status": "approved"}, business_id=entry.business_id)
+    db.commit()
+    return {"status": "approved", "entry_id": entry_id}
+
+
+# ── Master Recommendations ────────────────────────────────────────────────────
+
+@app.get("/master-recommendations", response_model=List[schemas.MasterRecommendationOut],
+         tags=["commander"])
+def list_master_recommendations(
+    status:   Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.MasterRecommendation)
+    if status:
+        q = q.filter(models.MasterRecommendation.status == status)
+    if severity:
+        q = q.filter(models.MasterRecommendation.severity == severity)
+    return q.order_by(models.MasterRecommendation.created_at.desc()).limit(limit).all()
+
+
+@app.put("/master-recommendations/{rec_id}/approve", tags=["commander"])
+def approve_master_recommendation(rec_id: int, db: Session = Depends(get_db),
+                                   admin: models.User = Depends(get_admin_user)):
+    rec = db.get(models.MasterRecommendation, rec_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found.")
+    rec.admin_approved = True
+    rec.status = "admin_approved"
+    db.commit()
+    return {"status": "approved", "rec_id": rec_id}
+
+
+# ── Audit Logs ────────────────────────────────────────────────────────────────
+
+@app.get("/audit-logs", response_model=List[schemas.AuditLogOut], tags=["audit"])
+def list_audit_logs(
+    business_id: Optional[int] = None,
+    entity_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    q = db.query(models.AuditLog)
+    if business_id:
+        q = q.filter(models.AuditLog.business_id == business_id)
+    if entity_type:
+        q = q.filter(models.AuditLog.entity_type == entity_type)
+    return q.order_by(models.AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+
+
+# ── Commander Future Agent Blueprint ─────────────────────────────────────────
+
+@app.post("/commander/future-agent-blueprint", tags=["commander"])
+async def future_agent_blueprint(
+    payload: schemas.FutureAgentBlueprintRequest,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(get_admin_user),
+):
+    """Generate a detailed future agent blueprint using Commander AI."""
+    from .commander import create_future_agent_blueprint
+    return await create_future_agent_blueprint(
+        requested_agent=payload.requested_agent,
+        purpose=payload.purpose,
+        required_tools=payload.required_tools or [],
+        data_inputs=payload.data_inputs or [],
+        data_outputs=payload.data_outputs or [],
+        db=db,
+        requested_by_id=admin.id,
+    )
+
+
+# ── Data Entry Stats ──────────────────────────────────────────────────────────
+
+@app.get("/data-entry/stats", tags=["data_entry"])
+def data_entry_stats(db: Session = Depends(get_db)):
+    """Dashboard stats for the Data Entry AI module."""
+    try:
+        return {
+            "total_documents":        db.query(models.UploadedDocument).count(),
+            "pending_jobs":           db.query(models.DataEntryJob).filter(
+                                          models.DataEntryJob.status == "pending_admin_approval").count(),
+            "approved_jobs":          db.query(models.DataEntryJob).filter(
+                                          models.DataEntryJob.admin_approved == True).count(),
+            "declined_jobs":          db.query(models.DataEntryJob).filter(
+                                          models.DataEntryJob.status == "declined_needs_revision").count(),
+            "total_patients":         db.query(models.Patient).count(),
+            "total_equipment_requests": db.query(models.EquipmentRequest).count(),
+            "pending_bookkeeping":    db.query(models.BookkeepingEntry).filter(
+                                          models.BookkeepingEntry.status == "draft").count(),
+            "approved_bookkeeping":   db.query(models.BookkeepingEntry).filter(
+                                          models.BookkeepingEntry.admin_approved == True).count(),
+            "master_recommendations": db.query(models.MasterRecommendation).filter(
+                                          models.MasterRecommendation.status == "pending_admin_review").count(),
+        }
+    except Exception as e:
+        return {"error": str(e)}

@@ -106,6 +106,30 @@ def run_health_check(db: Session) -> dict:
         alerts.append({"severity": "warning", "module": "ai",
                         "message": "Anthropic API key missing. AI call analysis, Commander intelligence, and agent generation are disabled."})
 
+    # ── Data entry queue
+    try:
+        pending_jobs  = db.query(models.DataEntryJob).filter(
+            models.DataEntryJob.status == "pending_admin_approval"
+        ).count()
+        total_docs    = db.query(models.UploadedDocument).count()
+        low_confidence = db.query(models.UploadedDocument).filter(
+            models.UploadedDocument.confidence_score < 0.60
+        ).count()
+        checks["data_entry"] = {
+            "status": "ok",
+            "pending_approval_jobs": pending_jobs,
+            "total_documents": total_docs,
+            "low_confidence_docs": low_confidence,
+        }
+        if pending_jobs >= 10:
+            alerts.append({"severity": "warning", "module": "data_entry",
+                            "message": f"{pending_jobs} data entry jobs awaiting admin approval."})
+        if low_confidence >= 5:
+            alerts.append({"severity": "info", "module": "data_entry",
+                            "message": f"{low_confidence} uploaded documents have low OCR confidence — manual review recommended."})
+    except Exception:
+        checks["data_entry"] = {"status": "unavailable"}
+
     # ── Unread alerts in DB
     try:
         unread = db.query(models.AdminAlert).filter(models.AdminAlert.is_read == False).count()
@@ -242,6 +266,224 @@ def _fallback_spec(description: str) -> dict:
     }
 
 
+# ── Data Entry Workflow ───────────────────────────────────────────────────────
+
+async def process_document_data_entry(
+    text: str,
+    filename: str,
+    workflow_type: str,
+    db: Session,
+    business_id: int = 0,
+) -> dict:
+    """
+    Full Commander-supervised data entry pipeline:
+    1. Document classification
+    2. Medical or bookkeeping extraction
+    3. Verification
+    4. Recommendations
+    Returns package ready for admin approval.
+    """
+    from .agents.data_entry import (
+        DocumentReaderAgent, MedicalDataEntryAgent,
+        BookkeepingEntryAgent, DataVerificationAgent,
+    )
+
+    reader_agent  = DocumentReaderAgent()
+    verify_agent  = DataVerificationAgent()
+
+    # Step 1 — classify document
+    reader_result = await reader_agent.run("classify", {"filename": filename, "text": text})
+    doc_info = reader_result.get("result", {})
+
+    # Step 2 — extract
+    if workflow_type == "bookkeeping":
+        extractor = BookkeepingEntryAgent()
+        extract_result = await extractor.run("extract", {"text": text, "use_ai": True})
+        raw_fields = extract_result.get("result", {}).get("entry", {})
+    else:
+        extractor = MedicalDataEntryAgent()
+        extract_result = await extractor.run("extract", {"text": text, "use_ai": True})
+        raw_fields = extract_result.get("result", {}).get("fields", {})
+
+    # Step 3 — verify
+    verify_result = await verify_agent.run(
+        "verify",
+        {"fields": raw_fields, "job_type": workflow_type},
+    )
+    verify_data = verify_result.get("result", {})
+
+    # Step 4 — Commander recommendations
+    recommendations = _build_data_entry_recommendations(doc_info, extract_result, verify_data)
+
+    # Persist Commander recommendation to DB if issues found
+    if verify_data.get("validation_errors") or verify_data.get("missing_required"):
+        try:
+            severity = "warning" if verify_data.get("validation_errors") else "info"
+            db.add(models.MasterRecommendation(
+                business_id=business_id if business_id else None,
+                module="data_entry",
+                severity=severity,
+                title=f"Data entry review needed — {filename}",
+                detail=json.dumps({
+                    "missing_required": verify_data.get("missing_required", []),
+                    "errors": verify_data.get("validation_errors", []),
+                }),
+                recommended_action="; ".join(recommendations),
+                auto_fix_available=False,
+                status="pending_admin_review",
+            ))
+            db.commit()
+        except Exception as e:
+            logger.error("Failed to save Commander recommendation: %s", e)
+
+    return {
+        "document_reader":          doc_info,
+        "extraction":               extract_result.get("result", {}),
+        "verification":             verify_data,
+        "commander_recommendations": recommendations,
+        "completeness_pct":         verify_data.get("completeness_pct", 0),
+        "can_proceed_to_admin":     verify_data.get("can_proceed_to_admin", False),
+        "next_step":                "Admin must review and approve before data is posted to production records.",
+        "phi_notice":               "HIPAA/PHI: No patient data is stored or transmitted without admin approval.",
+    }
+
+
+def _build_data_entry_recommendations(doc_info: dict, extract_result: dict, verify_data: dict) -> list:
+    recs = []
+    missing_required = verify_data.get("missing_required", [])
+    errors           = verify_data.get("validation_errors", [])
+    warnings         = verify_data.get("warnings", [])
+
+    if doc_info.get("needs_human_review"):
+        recs.append(f"Document quality is LOW (confidence: {doc_info.get('confidence_score', 0):.0%}). Request clearer scan or re-upload.")
+
+    if missing_required:
+        recs.append(f"Request missing required fields from patient/client: {', '.join(missing_required)}")
+
+    if errors:
+        recs.append(f"Fix validation errors before admin approval: {'; '.join(errors)}")
+
+    if warnings:
+        recs.append(f"Review field warnings: {'; '.join(warnings)}")
+
+    if not recs:
+        recs.append("Data appears complete and valid. Admin can review and approve for production posting.")
+
+    recs.append("RULE: Commander AI cannot post to production without admin approval.")
+    return recs
+
+
+# ── Future Agent Blueprint ────────────────────────────────────────────────────
+
+async def create_future_agent_blueprint(
+    requested_agent: str,
+    purpose: str,
+    required_tools: list,
+    data_inputs: list,
+    data_outputs: list,
+    db: Session,
+    requested_by_id: int | None = None,
+) -> dict:
+    """Generate a future agent blueprint and save as draft for admin approval."""
+    claude = _get_claude()
+
+    if claude:
+        prompt = f"""You are EZ-NEXUS COMMANDER AI. Generate a detailed future agent blueprint.
+
+Agent Name: {requested_agent}
+Purpose: {purpose}
+Required Tools: {required_tools}
+Data Inputs: {data_inputs}
+Data Outputs: {data_outputs}
+
+Return ONLY valid JSON:
+{{
+  "agent_name": "{requested_agent}",
+  "purpose": "2-3 sentence description",
+  "category": "healthcare|operations|finance|marketing|...",
+  "required_tools": ["tool — description"],
+  "data_inputs": ["input description"],
+  "data_outputs": ["output description"],
+  "workflow_steps": ["Step 1...", "Step 2...", "Step 3...", "Step 4...", "Step 5..."],
+  "database_fields": ["field_name: Type — description"],
+  "api_integrations": ["API name — purpose"],
+  "approval_rules": ["Rule"],
+  "testing_checklist": ["Test scenario — expected outcome"],
+  "estimated_dev_days": 5,
+  "complexity": "low|medium|high",
+  "monthly_cost_estimate": "$X–$Y/month",
+  "hipaa_considerations": ["consideration if applicable"]
+}}"""
+        try:
+            msg = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text.strip()
+            raw = re.sub(r'^```(?:json)?\s*', '', raw)
+            raw = re.sub(r'\s*```$', '', raw)
+            blueprint = json.loads(raw)
+        except Exception as e:
+            logger.error("Blueprint generation error: %s", e)
+            blueprint = _fallback_blueprint(requested_agent, purpose, required_tools)
+    else:
+        blueprint = _fallback_blueprint(requested_agent, purpose, required_tools)
+
+    # Save as draft agent definition
+    try:
+        record = models.AgentDefinition(
+            name=blueprint.get("agent_name", requested_agent),
+            purpose=blueprint.get("purpose", purpose),
+            spec_json=json.dumps(blueprint),
+            status="draft",
+            requested_by=requested_by_id,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        blueprint["agent_definition_id"] = record.id
+    except Exception as e:
+        logger.error("Failed to save blueprint: %s", e)
+
+    blueprint["requires_admin_approval"] = True
+    blueprint["note"] = "Commander AI cannot deploy agents to production without admin approval."
+    return blueprint
+
+
+def _fallback_blueprint(name: str, purpose: str, tools: list) -> dict:
+    return {
+        "agent_name": name,
+        "purpose": purpose,
+        "category": "general",
+        "required_tools": tools or ["database", "audit_log", "admin_approval"],
+        "data_inputs": ["document_upload", "manual_form_entry"],
+        "data_outputs": ["structured_json", "excel_export", "audit_log"],
+        "workflow_steps": [
+            "Step 1: Receive document or form input",
+            "Step 2: Classify and extract data using AI",
+            "Step 3: Validate extracted fields",
+            "Step 4: Prepare admin approval package",
+            "Step 5: Admin reviews and approves before production posting",
+        ],
+        "database_fields": ["id: Integer", "status: String", "created_at: DateTime"],
+        "api_integrations": ["Anthropic Claude — AI extraction"],
+        "approval_rules": [
+            "Agent can draft, extract, and recommend",
+            "Agent cannot post to production without admin approval",
+        ],
+        "testing_checklist": [
+            "Upload test document — verify extraction",
+            "Verify missing field detection",
+            "Verify admin approval workflow",
+            "Verify audit log creation",
+        ],
+        "estimated_dev_days": 7,
+        "complexity": "medium",
+        "monthly_cost_estimate": "$10–$50/month",
+    }
+
+
 # ── Commander Chat ────────────────────────────────────────────────────────────
 
 async def chat_with_commander(message: str, db: Session) -> str:
@@ -250,42 +492,56 @@ async def chat_with_commander(message: str, db: Session) -> str:
 
     # Build live context
     try:
-        total_biz    = db.query(models.Business).filter(models.Business.is_active == True).count()
-        total_appts  = db.query(models.Appointment).count()
-        pending_appr = db.query(models.Appointment).filter(models.Appointment.status == "pending_approval").count()
+        total_biz     = db.query(models.Business).filter(models.Business.is_active == True).count()
+        total_appts   = db.query(models.Appointment).count()
+        pending_appr  = db.query(models.Appointment).filter(models.Appointment.status == "pending_approval").count()
         unread_alerts = db.query(models.AdminAlert).filter(models.AdminAlert.is_read == False).count()
-        week_ago = datetime.utcnow() - timedelta(days=7)
-        weekly   = db.query(models.Appointment).filter(models.Appointment.created_at >= week_ago).count()
+        week_ago      = datetime.utcnow() - timedelta(days=7)
+        weekly        = db.query(models.Appointment).filter(models.Appointment.created_at >= week_ago).count()
     except Exception:
         total_biz = total_appts = pending_appr = unread_alerts = weekly = 0
+
+    try:
+        pending_de_jobs = db.query(models.DataEntryJob).filter(
+            models.DataEntryJob.status == "pending_admin_approval"
+        ).count()
+        total_docs = db.query(models.UploadedDocument).count()
+        total_patients = db.query(models.Patient).count()
+    except Exception:
+        pending_de_jobs = total_docs = total_patients = 0
 
     active_agents  = [a["name"] for a in AGENT_ROSTER if a["status"] == "active"]
     pending_agents = [a["name"] for a in AGENT_ROSTER if a["status"] == "coming_soon"]
 
     system_ctx = f"""You are EZ-NEXUS COMMANDER AI — the master intelligence brain of the EZ-NEXUS AI platform.
-You are the central nervous system that supervises all agents, monitors health, and advises the admin.
+You supervise 18 specialized agents, monitor system health, analyze data quality, and advise the admin.
 
 CURRENT SYSTEM STATE (live):
 • Active businesses: {total_biz}
-• Total appointments: {total_appts}
-• Weekly appointments: {weekly}
-• Pending approvals: {pending_appr}
+• Total appointments: {total_appts}  |  Weekly: {weekly}
+• Pending appointment approvals: {pending_appr}
 • Unread alerts: {unread_alerts}
+• Data entry jobs pending approval: {pending_de_jobs}
+• Total documents processed: {total_docs}
+• Total patients in system: {total_patients}
 • Twilio AI Calls: {"✅ ACTIVE" if settings.twilio_configured else "⚠️ NOT CONFIGURED"}
-• Email confirmations: {"✅ ACTIVE" if settings.smtp_configured else "⚠️ NOT CONFIGURED"}
+• Email: {"✅ ACTIVE" if settings.smtp_configured else "⚠️ NOT CONFIGURED"}
 • AI Engine (Claude): {"✅ ACTIVE" if settings.anthropic_api_key else "⚠️ NOT CONFIGURED"}
+• OCR: {"✅ ENABLED" if settings.enable_ocr else "⚠️ DISABLED"}
+• PHI Mode (HIPAA): {"✅ ON" if settings.phi_mode else "⚠️ OFF"}
+• Admin Approval Required: {"✅ YES" if settings.require_admin_approval else "⚠️ DISABLED"}
 
-ACTIVE AGENTS ({len(active_agents)}): {", ".join(active_agents)}
-COMING SOON ({len(pending_agents)}): {", ".join(pending_agents)}
+ACTIVE AGENTS (18 total): {", ".join(active_agents)}
+MODULES: Call Center | Appointments | Healthcare | DME Marketplace | Data Entry | Bookkeeping | Compliance
 
-YOUR RULES:
-1. You NEVER change production systems without admin approval
-2. Always: Detect issue → Suggest fix → Wait for admin approval → System applies
-3. Be concise, direct, and actionable
-4. Always end with a specific next-step recommendation
+YOUR RULES (NEVER BREAK):
+1. NEVER change production systems, medical records, insurance data, or bookkeeping without admin approval
+2. Flow: Detect → Suggest → Admin Approves → System Applies
+3. PHI/HIPAA: Patient data stays private. Never expose raw records.
+4. Be concise, direct, and actionable. End with a specific next-step.
 
-You can: monitor health, suggest fixes, generate new agent specs, explain the platform,
-analyze performance, recommend upgrades, and answer any admin question."""
+You can: monitor health, analyze data quality, review missing fields, suggest fixes,
+generate agent blueprints, explain workflows, and answer any admin question."""
 
     if not claude:
         return (

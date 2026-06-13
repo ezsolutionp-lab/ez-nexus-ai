@@ -439,3 +439,287 @@ class CallLogOut(BaseModel):
     created_at:     datetime
 
     model_config = {"from_attributes": True}
+
+
+# ─── Patient Schemas ───────────────────────────────────────────────────────────
+
+class PatientCreate(BaseModel):
+    business_id:        int
+    first_name:         str
+    last_name:          str
+    date_of_birth:      Optional[str] = None
+    phone:              Optional[str] = None
+    email:              Optional[str] = None
+    address:            Optional[str] = None
+    city:               Optional[str] = None
+    state:              Optional[str] = None
+    zip_code:           Optional[str] = None
+    emergency_contact:  Optional[str] = None
+    preferred_language: Optional[str] = "en"
+    notes:              Optional[str] = None
+
+
+class PatientUpdate(BaseModel):
+    first_name:         Optional[str] = None
+    last_name:          Optional[str] = None
+    date_of_birth:      Optional[str] = None
+    phone:              Optional[str] = None
+    email:              Optional[str] = None
+    address:            Optional[str] = None
+    city:               Optional[str] = None
+    state:              Optional[str] = None
+    zip_code:           Optional[str] = None
+    emergency_contact:  Optional[str] = None
+    preferred_language: Optional[str] = None
+    notes:              Optional[str] = None
+
+
+class PatientOut(BaseModel):
+    id:                 int
+    business_id:        int
+    first_name:         str
+    last_name:          str
+    date_of_birth:      Optional[str]
+    phone:              Optional[str]
+    email:              Optional[str]
+    address:            Optional[str]
+    city:               Optional[str]
+    state:              Optional[str]
+    zip_code:           Optional[str]
+    emergency_contact:  Optional[str]
+    preferred_language: str
+    notes:              Optional[str]
+    created_at:         datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Insurance Profile Schemas ─────────────────────────────────────────────────
+
+class InsuranceProfileCreate(BaseModel):
+    patient_id:              int
+    payer_name:              Optional[str] = None
+    plan_type:               Optional[str] = None
+    member_id:               Optional[str] = None
+    group_number:            Optional[str] = None
+    policy_holder:           Optional[str] = None
+    relationship_to_patient: Optional[str] = None
+    phone_number:            Optional[str] = None
+    eligibility_status:      Optional[str] = "unknown"
+    raw_payload:             Optional[str] = None
+
+
+class InsuranceProfileUpdate(BaseModel):
+    payer_name:              Optional[str] = None
+    plan_type:               Optional[str] = None
+    member_id:               Optional[str] = None
+    group_number:            Optional[str] = None
+    policy_holder:           Optional[str] = None
+    relationship_to_patient: Optional[str] = None
+    phone_number:            Optional[str] = None
+    eligibility_status:      Optional[str] = None
+    raw_payload:             Optional[str] = None
+
+
+class InsuranceProfileOut(BaseModel):
+    id:                      int
+    patient_id:              int
+    payer_name:              Optional[str]
+    plan_type:               Optional[str]
+    member_id:               Optional[str]
+    group_number:            Optional[str]
+    policy_holder:           Optional[str]
+    relationship_to_patient: Optional[str]
+    phone_number:            Optional[str]
+    eligibility_status:      str
+    created_at:              datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Uploaded Document Schemas ─────────────────────────────────────────────────
+
+class UploadedDocumentOut(BaseModel):
+    id:                int
+    business_id:       int
+    patient_id:        Optional[int]
+    filename:          str
+    content_type:      Optional[str]
+    document_type:     str
+    extraction_status: str
+    confidence_score:  float
+    file_size_kb:      Optional[int]
+    created_at:        datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Data Entry Job Schemas ────────────────────────────────────────────────────
+
+class DataEntryJobOut(BaseModel):
+    id:                       int
+    business_id:              int
+    document_id:              Optional[int]
+    job_type:                 str
+    status:                   str
+    extracted_fields:         Optional[str]
+    missing_fields:           Optional[str]
+    validation_errors:        Optional[str]
+    commander_recommendations: Optional[str]
+    admin_approved:           bool
+    approval_notes:           Optional[str]
+    created_by_agent:         str
+    created_at:               datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DataEntryApproveRequest(BaseModel):
+    admin_notes: Optional[str] = ""
+
+
+class DataEntryDeclineRequest(BaseModel):
+    reason: str
+
+
+# ─── Equipment Request Schemas ─────────────────────────────────────────────────
+
+class EquipmentRequestCreate(BaseModel):
+    business_id:         int
+    patient_id:          Optional[int] = None
+    equipment_type:      str
+    diagnosis_or_reason: Optional[str] = None
+    prescribing_provider: Optional[str] = None
+    insurance_required:  Optional[bool] = True
+    prior_auth_required: Optional[bool] = False
+    hcpcs_codes:         Optional[str] = None
+    notes:               Optional[str] = None
+
+
+class EquipmentRequestUpdate(BaseModel):
+    equipment_type:       Optional[str] = None
+    diagnosis_or_reason:  Optional[str] = None
+    prescribing_provider: Optional[str] = None
+    insurance_required:   Optional[bool] = None
+    prior_auth_required:  Optional[bool] = None
+    hcpcs_codes:          Optional[str] = None
+    status:               Optional[str] = None
+    notes:                Optional[str] = None
+
+
+class EquipmentRequestOut(BaseModel):
+    id:                   int
+    business_id:          int
+    patient_id:           Optional[int]
+    equipment_type:       str
+    diagnosis_or_reason:  Optional[str]
+    prescribing_provider: Optional[str]
+    insurance_required:   bool
+    prior_auth_required:  bool
+    hcpcs_codes:          Optional[str]
+    status:               str
+    notes:                Optional[str]
+    created_at:           datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Bookkeeping Entry Schemas ─────────────────────────────────────────────────
+
+class BookkeepingEntryCreate(BaseModel):
+    business_id:        int
+    source_document_id: Optional[int] = None
+    entry_type:         Optional[str] = None
+    vendor_or_customer: Optional[str] = None
+    transaction_date:   Optional[str] = None
+    amount:             Optional[float] = 0.0
+    category:           Optional[str] = None
+    memo:               Optional[str] = None
+    tax_flag:           Optional[bool] = False
+
+
+class BookkeepingEntryUpdate(BaseModel):
+    entry_type:         Optional[str] = None
+    vendor_or_customer: Optional[str] = None
+    transaction_date:   Optional[str] = None
+    amount:             Optional[float] = None
+    category:           Optional[str] = None
+    memo:               Optional[str] = None
+    tax_flag:           Optional[bool] = None
+    status:             Optional[str] = None
+    admin_approved:     Optional[bool] = None
+
+
+class BookkeepingEntryOut(BaseModel):
+    id:                  int
+    business_id:         int
+    source_document_id:  Optional[int]
+    entry_type:          Optional[str]
+    vendor_or_customer:  Optional[str]
+    transaction_date:    Optional[str]
+    amount:              float
+    category:            Optional[str]
+    memo:                Optional[str]
+    tax_flag:            bool
+    status:              str
+    admin_approved:      bool
+    created_at:          datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Master Recommendation Schemas ────────────────────────────────────────────
+
+class MasterRecommendationOut(BaseModel):
+    id:                  int
+    business_id:         Optional[int]
+    module:              str
+    severity:            str
+    title:               str
+    detail:              Optional[str]
+    recommended_action:  Optional[str]
+    auto_fix_available:  bool
+    admin_approved:      bool
+    status:              str
+    created_at:          datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Audit Log Schemas ─────────────────────────────────────────────────────────
+
+class AuditLogOut(BaseModel):
+    id:          int
+    business_id: Optional[int]
+    actor:       str
+    action:      str
+    entity_type: Optional[str]
+    entity_id:   Optional[str]
+    before_data: Optional[str]
+    after_data:  Optional[str]
+    created_at:  datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Data Entry Processing Schemas ────────────────────────────────────────────
+
+class DataEntryProcessResult(BaseModel):
+    document_id:              int
+    job_id:                   int
+    document_reader:          dict
+    extraction:               dict
+    verification:             dict
+    commander_recommendations: List[str]
+    completeness_pct:         float
+    can_proceed_to_admin:     bool
+    next_step:                str
+    requires_admin_approval:  bool = True
+
+
+class FutureAgentBlueprintRequest(BaseModel):
+    requested_agent: str
+    purpose:         str
+    required_tools:  Optional[List[str]] = []
+    data_inputs:     Optional[List[str]] = []
+    data_outputs:    Optional[List[str]] = []

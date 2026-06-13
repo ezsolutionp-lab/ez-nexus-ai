@@ -214,3 +214,163 @@ class CallLog(Base):
     ai_summary     = Column(Text, nullable=True)
     appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True)
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Data Entry / Document Automation Models ───────────────────────────────────
+
+class Patient(Base):
+    """Detailed patient record for healthcare / DME workflows."""
+    __tablename__ = "patients"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    business_id       = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    first_name        = Column(String(120), nullable=False)
+    last_name         = Column(String(120), nullable=False)
+    date_of_birth     = Column(String(40), nullable=True)
+    phone             = Column(String(40), nullable=True)
+    email             = Column(String(255), nullable=True)
+    address           = Column(Text, nullable=True)
+    city              = Column(String(100), nullable=True)
+    state             = Column(String(50), nullable=True)
+    zip_code          = Column(String(20), nullable=True)
+    emergency_contact = Column(String(255), nullable=True)
+    preferred_language = Column(String(20), default="en")
+    notes             = Column(Text, nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    insurance_profiles = relationship("InsuranceProfile", back_populates="patient", cascade="all, delete-orphan")
+    equipment_requests  = relationship("EquipmentRequest", back_populates="patient", cascade="all, delete-orphan")
+
+
+class InsuranceProfile(Base):
+    """Insurance card / eligibility record linked to a patient."""
+    __tablename__ = "insurance_profiles"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    patient_id               = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    payer_name               = Column(String(255), nullable=True)
+    plan_type                = Column(String(100), nullable=True)
+    member_id                = Column(String(120), nullable=True)
+    group_number             = Column(String(120), nullable=True)
+    policy_holder            = Column(String(255), nullable=True)
+    relationship_to_patient  = Column(String(80), nullable=True)
+    phone_number             = Column(String(40), nullable=True)
+    eligibility_status       = Column(String(80), default="unknown")  # unknown|eligible|ineligible|pending
+    raw_payload              = Column(Text, nullable=True)  # JSON string of OCR/extracted data
+    created_at               = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("Patient", back_populates="insurance_profiles")
+
+
+class UploadedDocument(Base):
+    """Tracks every document uploaded for data entry processing."""
+    __tablename__ = "uploaded_documents"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    business_id       = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    patient_id        = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    filename          = Column(String(255), nullable=False)
+    content_type      = Column(String(120), nullable=True)
+    storage_path      = Column(Text, nullable=False)
+    document_type     = Column(String(80), default="unknown")   # pdf|scanned_pdf|image|word|spreadsheet|unknown
+    extracted_text    = Column(Text, nullable=True)
+    extraction_status = Column(String(80), default="pending")   # pending|completed|needs_review|failed
+    confidence_score  = Column(Float, default=0.0)
+    file_size_kb      = Column(Integer, nullable=True)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    data_entry_jobs = relationship("DataEntryJob", back_populates="document", cascade="all, delete-orphan")
+
+
+class DataEntryJob(Base):
+    """One AI data-extraction + admin-approval cycle."""
+    __tablename__ = "data_entry_jobs"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    business_id       = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id       = Column(Integer, ForeignKey("uploaded_documents.id", ondelete="SET NULL"), nullable=True)
+    job_type          = Column(String(100), nullable=False)   # medical|bookkeeping|insurance|equipment
+    status            = Column(String(80), default="draft")   # draft|pending_admin_approval|approved_ready_to_post|declined_needs_revision|posted
+    extracted_fields  = Column(Text, nullable=True)   # JSON string
+    missing_fields    = Column(Text, nullable=True)   # JSON array string
+    validation_errors = Column(Text, nullable=True)   # JSON array string
+    commander_recommendations = Column(Text, nullable=True)   # JSON array string
+    admin_approved    = Column(Boolean, default=False)
+    approval_notes    = Column(Text, nullable=True)
+    created_by_agent  = Column(String(120), default="medical_data_entry_agent")
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at        = Column(DateTime(timezone=True), onupdate=func.now())
+
+    document = relationship("UploadedDocument", back_populates="data_entry_jobs")
+
+
+class EquipmentRequest(Base):
+    """DME / medical equipment request linked to a patient."""
+    __tablename__ = "equipment_requests"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    business_id          = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    patient_id           = Column(Integer, ForeignKey("patients.id", ondelete="SET NULL"), nullable=True)
+    equipment_type       = Column(String(180), nullable=False)
+    diagnosis_or_reason  = Column(Text, nullable=True)
+    prescribing_provider = Column(String(255), nullable=True)
+    insurance_required   = Column(Boolean, default=True)
+    prior_auth_required  = Column(Boolean, default=False)
+    hcpcs_codes          = Column(String(200), nullable=True)   # comma-separated
+    status               = Column(String(80), default="intake")  # intake|pending_auth|approved|denied|fulfilled
+    notes                = Column(Text, nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+
+    patient = relationship("Patient", back_populates="equipment_requests")
+
+
+class BookkeepingEntry(Base):
+    """Receipt, invoice, expense, or revenue record extracted by AI."""
+    __tablename__ = "bookkeeping_entries"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    business_id         = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_document_id  = Column(Integer, ForeignKey("uploaded_documents.id", ondelete="SET NULL"), nullable=True)
+    entry_type          = Column(String(80), nullable=True)   # expense|revenue|invoice|receipt
+    vendor_or_customer  = Column(String(255), nullable=True)
+    transaction_date    = Column(String(40), nullable=True)
+    amount              = Column(Float, default=0.0)
+    category            = Column(String(120), nullable=True)
+    memo                = Column(Text, nullable=True)
+    tax_flag            = Column(Boolean, default=False)
+    status              = Column(String(80), default="draft")   # draft|pending_admin_approval|approved|posted
+    admin_approved      = Column(Boolean, default=False)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class MasterRecommendation(Base):
+    """Commander AI-generated recommendation requiring admin review."""
+    __tablename__ = "master_recommendations"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    business_id          = Column(Integer, ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True)
+    module               = Column(String(120), nullable=False)
+    severity             = Column(String(40), default="info")   # critical|warning|info
+    title                = Column(String(255), nullable=False)
+    detail               = Column(Text, nullable=True)
+    recommended_action   = Column(Text, nullable=True)
+    auto_fix_available   = Column(Boolean, default=False)
+    admin_approved       = Column(Boolean, default=False)
+    status               = Column(String(80), default="pending_admin_review")
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    """Immutable audit trail for all significant system actions."""
+    __tablename__ = "audit_logs"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    business_id = Column(Integer, ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True)
+    actor       = Column(String(120), nullable=False)   # admin|agent_name|system
+    action      = Column(String(180), nullable=False)
+    entity_type = Column(String(120), nullable=True)
+    entity_id   = Column(String(120), nullable=True)
+    before_data = Column(Text, nullable=True)   # JSON string
+    after_data  = Column(Text, nullable=True)   # JSON string
+    ip_address  = Column(String(45), nullable=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())

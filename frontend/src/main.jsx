@@ -1583,6 +1583,596 @@ function authFetch(path, token, options = {}) {
   })
 }
 
+// ── Data Entry AI Tab ─────────────────────────────────────────────────────────
+function DataEntryTab() {
+  const [panel, setPanel]         = useState('upload')   // upload | jobs | patients | equipment | bookkeeping | audit
+  const [businesses, setBusinesses] = useState([])
+  const [stats, setStats]         = useState(null)
+  const [jobs, setJobs]           = useState([])
+  const [documents, setDocuments] = useState([])
+  const [patients, setPatients]   = useState([])
+  const [equipment, setEquipment] = useState([])
+  const [bookkeeping, setBookkeeping] = useState([])
+  const [auditLogs, setAuditLogs] = useState([])
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState('')
+  const [success, setSuccess]     = useState('')
+
+  // Upload state
+  const [uploadFile, setUploadFile]     = useState(null)
+  const [uploadBizId, setUploadBizId]   = useState('')
+  const [workflowType, setWorkflowType] = useState('medical')
+  const [uploading, setUploading]       = useState(false)
+  const [uploadResult, setUploadResult] = useState(null)
+  const [dragOver, setDragOver]         = useState(false)
+
+  // Patient form
+  const [showPatForm, setShowPatForm] = useState(false)
+  const [patForm, setPatForm] = useState({ business_id:'', first_name:'', last_name:'', date_of_birth:'', phone:'', email:'', address:'', city:'', state:'', zip_code:'', preferred_language:'en' })
+
+  // Equipment form
+  const [showEqForm, setShowEqForm] = useState(false)
+  const [eqForm, setEqForm] = useState({ business_id:'', patient_id:'', equipment_type:'', diagnosis_or_reason:'', prescribing_provider:'', hcpcs_codes:'', insurance_required:true })
+
+  // Bookkeeping form
+  const [showBkForm, setShowBkForm] = useState(false)
+  const [bkForm, setBkForm] = useState({ business_id:'', entry_type:'invoice', vendor_or_customer:'', transaction_date:'', amount:'', category:'', memo:'', tax_flag:false })
+
+  const { user } = useAuth()
+
+  const loadAll = async () => {
+    setLoading(true)
+    try {
+      const [b, s, j, p] = await Promise.all([
+        apiFetch('/businesses'),
+        apiFetch('/data-entry/stats'),
+        apiFetch('/data-entry/jobs?limit=50'),
+        apiFetch('/patients?limit=50'),
+      ])
+      setBusinesses(b); setStats(s); setJobs(j); setPatients(p)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  const loadPanel = async (p) => {
+    setPanel(p); setError('')
+    if (p === 'bookkeeping') {
+      try { setBookkeeping(await apiFetch('/bookkeeping?limit=50')) } catch (e) { setError(e.message) }
+    } else if (p === 'equipment') {
+      try { setEquipment(await apiFetch('/equipment-requests?limit=50')) } catch (e) { setError(e.message) }
+    } else if (p === 'audit') {
+      try { setAuditLogs(await apiFetch('/audit-logs?limit=50')) } catch (e) { setError(e.message) }
+    }
+  }
+
+  useEffect(() => { loadAll() }, [])
+
+  // ── Upload with progress
+  const handleUpload = async (e) => {
+    e.preventDefault()
+    if (!uploadFile) return setError('Please select a document first')
+    if (!uploadBizId) return setError('Please select a business')
+    setUploading(true); setError(''); setUploadResult(null); setSuccess('')
+    try {
+      const token = localStorage.getItem('ez_token')
+      const form = new FormData()
+      form.append('business_id', uploadBizId)
+      form.append('workflow_type', workflowType)
+      form.append('file', uploadFile)
+      const res = await fetch(`${API}/data-entry/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Upload failed')
+      setUploadResult(data)
+      setSuccess('Document processed! Review the extraction below and check the Jobs Queue.')
+      loadAll()
+    } catch (e) { setError(e.message) }
+    finally { setUploading(false) }
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragOver(false)
+    const f = e.dataTransfer.files[0]
+    if (f) setUploadFile(f)
+  }
+
+  // ── Job actions
+  const approveJob = async (id) => {
+    try {
+      await apiFetch(`/data-entry/jobs/${id}/approve`, { method:'POST', body: JSON.stringify({ admin_notes: 'Approved by admin' }) })
+      setSuccess(`Job #${id} approved!`); loadAll()
+    } catch (e) { setError(e.message) }
+  }
+  const declineJob = async (id) => {
+    const reason = prompt('Reason for decline?') || 'Needs revision'
+    try {
+      await apiFetch(`/data-entry/jobs/${id}/decline`, { method:'POST', body: JSON.stringify({ reason }) })
+      setSuccess(`Job #${id} declined.`); loadAll()
+    } catch (e) { setError(e.message) }
+  }
+
+  // ── Patient
+  const savePatient = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/patients', { method:'POST', body: JSON.stringify({ ...patForm, business_id: Number(patForm.business_id) }) })
+      setSuccess('Patient created!'); setShowPatForm(false)
+      setPatients(await apiFetch('/patients?limit=50'))
+    } catch (e) { setError(e.message) }
+  }
+
+  // ── Equipment
+  const saveEquipment = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/equipment-requests', { method:'POST', body: JSON.stringify({ ...eqForm, business_id: Number(eqForm.business_id), patient_id: eqForm.patient_id ? Number(eqForm.patient_id) : null }) })
+      setSuccess('Equipment request created!'); setShowEqForm(false)
+      setEquipment(await apiFetch('/equipment-requests?limit=50'))
+    } catch (e) { setError(e.message) }
+  }
+
+  // ── Bookkeeping
+  const saveBookkeeping = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/bookkeeping', { method:'POST', body: JSON.stringify({ ...bkForm, business_id: Number(bkForm.business_id), amount: Number(bkForm.amount) }) })
+      setSuccess('Bookkeeping entry created (draft — pending approval)!'); setShowBkForm(false)
+      setBookkeeping(await apiFetch('/bookkeeping?limit=50'))
+    } catch (e) { setError(e.message) }
+  }
+  const approveBk = async (id) => {
+    try { await apiFetch(`/bookkeeping/${id}/approve`, { method:'POST' }); setSuccess('Entry approved!'); setBookkeeping(await apiFetch('/bookkeeping?limit=50')) } catch (e) { setError(e.message) }
+  }
+
+  // ── Export
+  const exportExcel = async (type) => {
+    if (!uploadBizId) return setError('Select a business first')
+    try {
+      const token = localStorage.getItem('ez_token')
+      const res = await fetch(`${API}/data-entry/export/${type}-excel?business_id=${uploadBizId}`, {
+        method:'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Export failed') }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url
+      a.download = `${type}_export.xlsx`; document.body.appendChild(a); a.click()
+      URL.revokeObjectURL(url); a.remove()
+    } catch (e) { setError(e.message) }
+  }
+
+  const STATUS_BADGE = {
+    'pending_admin_approval': '#f59e0b',
+    'approved_ready_to_post': '#22c55e',
+    'declined_needs_revision': '#ef4444',
+    'draft': '#64748b',
+    'posted': '#3b82f6',
+  }
+
+  const PANEL_TABS = [
+    { id:'upload',      label:'📤 Upload & Extract' },
+    { id:'jobs',        label:'📋 Approval Queue' },
+    { id:'patients',    label:'👤 Patients' },
+    { id:'equipment',   label:'🦽 Equipment' },
+    { id:'bookkeeping', label:'📒 Bookkeeping' },
+    { id:'audit',       label:'🔐 Audit Log' },
+  ]
+
+  return (
+    <div>
+      {/* Module header */}
+      <div style={{ background:'linear-gradient(135deg,#0f172a,#1e293b)', borderRadius:12, padding:'20px 24px', marginBottom:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:12 }}>
+          <div>
+            <div style={{ fontSize:'1.3rem', fontWeight:700, color:'#f1f5f9' }}>🤖 Data Entry AI Module</div>
+            <div style={{ color:'#94a3b8', fontSize:'.85rem', marginTop:4 }}>
+              Document OCR • Medical Data Extraction • Insurance Verification • Excel Export • Bookkeeping
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <select className="input" style={{ width:'auto', fontSize:'.8rem', padding:'5px 10px' }} value={uploadBizId} onChange={e => setUploadBizId(e.target.value)}>
+              <option value="">Select Business</option>
+              {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <button className="btn btn-outline" style={{ fontSize:'.75rem', padding:'5px 10px' }} onClick={() => exportExcel('patient')}>⬇ Patient Excel</button>
+            <button className="btn btn-outline" style={{ fontSize:'.75rem', padding:'5px 10px' }} onClick={() => exportExcel('bookkeeping')}>⬇ Bookkeeping Excel</button>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        {stats && (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))', gap:10, marginTop:16 }}>
+            {[
+              ['📄 Documents',   stats.total_documents,         '#3b82f6'],
+              ['⏳ Pending',      stats.pending_jobs,            '#f59e0b'],
+              ['✅ Approved',     stats.approved_jobs,           '#22c55e'],
+              ['❌ Declined',     stats.declined_jobs,           '#ef4444'],
+              ['👤 Patients',     stats.total_patients,          '#8b5cf6'],
+              ['🦽 Equipment',    stats.total_equipment_requests,'#14b8a6'],
+              ['📒 Bookkeeping',  stats.approved_bookkeeping,    '#f97316'],
+            ].map(([label, val, color]) => (
+              <div key={label} style={{ background:'rgba(255,255,255,.05)', borderRadius:8, padding:'10px 12px', borderLeft:`3px solid ${color}` }}>
+                <div style={{ fontSize:'.7rem', color:'#94a3b8' }}>{label}</div>
+                <div style={{ fontSize:'1.4rem', fontWeight:700, color:'#f1f5f9' }}>{val ?? 0}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Alert msg={error} type="error" />
+      {success && <div className="alert alert-success" style={{ background:'#14532d', border:'1px solid #16a34a', color:'#86efac' }}>{success}</div>}
+
+      {/* Sub-tabs */}
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {PANEL_TABS.map(t => (
+          <button key={t.id} className={`tab-btn ${panel===t.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }}
+            onClick={() => loadPanel(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Upload & Extract ── */}
+      {panel === 'upload' && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+          <div className="card">
+            <h3 style={{ marginBottom:12 }}>📤 Upload Document</h3>
+            <p style={{ color:'#94a3b8', fontSize:'.82rem', marginBottom:12 }}>
+              Supports: PDF, Scanned PDF, Images (JPG/PNG), Word (.docx), Excel (.xlsx), CSV • Max {import.meta.env.VITE_MAX_UPLOAD_MB || 25}MB
+            </p>
+
+            {/* Drag & Drop zone */}
+            <div
+              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => document.getElementById('de-file-input').click()}
+              style={{
+                border: `2px dashed ${dragOver ? '#3b82f6' : '#334155'}`,
+                borderRadius:10, padding:'30px 20px', textAlign:'center',
+                cursor:'pointer', marginBottom:12, transition:'all .2s',
+                background: dragOver ? 'rgba(59,130,246,.05)' : 'transparent',
+              }}
+            >
+              <input id="de-file-input" type="file" hidden
+                accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.heic,.tif,.tiff"
+                onChange={e => setUploadFile(e.target.files[0])} />
+              <div style={{ fontSize:'2rem', marginBottom:6 }}>📁</div>
+              <div style={{ color:'#94a3b8', fontSize:'.82rem' }}>
+                {uploadFile ? (
+                  <><strong style={{ color:'#60a5fa' }}>{uploadFile.name}</strong><br />{(uploadFile.size/1024).toFixed(0)} KB</>
+                ) : 'Drag & drop or click to browse'}
+              </div>
+            </div>
+
+            <form onSubmit={handleUpload} style={{ display:'grid', gap:10 }}>
+              <select className="input" value={workflowType} onChange={e => setWorkflowType(e.target.value)} required>
+                <option value="medical">🏥 Medical Patient / Insurance</option>
+                <option value="bookkeeping">📒 Bookkeeping / Invoice / Receipt</option>
+                <option value="insurance">🔒 Insurance Card Only</option>
+                <option value="equipment">🦽 Equipment Request Form</option>
+              </select>
+              <button type="submit" className="btn btn-primary" disabled={uploading || !uploadFile || !uploadBizId}>
+                {uploading ? '🔄 Processing with Commander AI…' : '🚀 Process Document'}
+              </button>
+            </form>
+
+            <div style={{ marginTop:14, padding:10, background:'rgba(251,191,36,.08)', border:'1px solid rgba(251,191,36,.3)', borderRadius:8, fontSize:'.75rem', color:'#fbbf24' }}>
+              ⚠️ <strong>HIPAA Notice:</strong> No medical, insurance, or bookkeeping data is posted to production without admin approval.
+            </div>
+          </div>
+
+          {/* Upload Result */}
+          <div className="card" style={{ overflow:'auto' }}>
+            <h3 style={{ marginBottom:12 }}>🧠 Commander AI Extraction</h3>
+            {!uploadResult && <p style={{ color:'#64748b', fontSize:'.85rem' }}>Upload a document to see AI extraction results here.</p>}
+            {uploadResult && (() => {
+              const r = uploadResult.commander_result || {}
+              const ext = r.extraction || {}
+              const fields = ext.fields || ext.entry || {}
+              const verify = r.verification || {}
+              const recs = r.commander_recommendations || []
+              return (
+                <div style={{ fontSize:'.8rem' }}>
+                  {/* Document info */}
+                  <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+                    <span style={{ background:'#1e293b', padding:'3px 10px', borderRadius:12, color:'#94a3b8' }}>
+                      📄 {uploadResult.document_type?.replace(/_/g,' ')}
+                    </span>
+                    <span style={{ background: uploadResult.confidence_score >= .7 ? '#14532d' : '#78350f', color:'#fff', padding:'3px 10px', borderRadius:12 }}>
+                      Confidence: {((uploadResult.confidence_score || 0)*100).toFixed(0)}%
+                    </span>
+                    <span style={{ background:'#1e40af', color:'#fff', padding:'3px 10px', borderRadius:12 }}>
+                      Job #{uploadResult.job_id}
+                    </span>
+                  </div>
+
+                  {/* Extracted fields */}
+                  {Object.keys(fields).length > 0 && (
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontWeight:600, color:'#60a5fa', marginBottom:6 }}>Extracted Fields</div>
+                      {Object.entries(fields).map(([k, v]) => v ? (
+                        <div key={k} style={{ display:'flex', gap:8, padding:'3px 0', borderBottom:'1px solid #1e293b' }}>
+                          <span style={{ color:'#64748b', minWidth:160 }}>{k.replace(/_/g,' ')}</span>
+                          <span style={{ color:'#e2e8f0', flex:1, wordBreak:'break-all' }}>{String(v)}</span>
+                        </div>
+                      ) : null)}
+                    </div>
+                  )}
+
+                  {/* Missing fields */}
+                  {verify.missing_required?.length > 0 && (
+                    <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, padding:10, marginBottom:10 }}>
+                      <div style={{ color:'#f87171', fontWeight:600, marginBottom:4 }}>⚠ Missing Required Fields</div>
+                      {verify.missing_required.map((f, i) => <div key={i} style={{ color:'#fca5a5', fontSize:'.75rem' }}>• {f.replace(/_/g,' ')}</div>)}
+                    </div>
+                  )}
+
+                  {/* Recommendations */}
+                  {recs.length > 0 && (
+                    <div style={{ background:'rgba(16,185,129,.08)', border:'1px solid rgba(16,185,129,.2)', borderRadius:8, padding:10 }}>
+                      <div style={{ color:'#34d399', fontWeight:600, marginBottom:4 }}>🧠 Commander Recommendations</div>
+                      {recs.map((r, i) => <div key={i} style={{ color:'#6ee7b7', fontSize:'.75rem', marginBottom:2 }}>• {r}</div>)}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ── Approval Queue ── */}
+      {panel === 'jobs' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>📋 Admin Approval Queue</h3>
+            <button className="btn btn-outline btn-sm" onClick={loadAll}>↻ Refresh</button>
+          </div>
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>#</th><th>Type</th><th>Status</th><th>Missing Fields</th><th>Errors</th><th>Complete %</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {jobs.length === 0 && <tr><td colSpan={7} style={{ textAlign:'center', color:'#64748b' }}>No jobs yet. Upload a document to get started.</td></tr>}
+                  {jobs.map(j => {
+                    let missing = [], errors = []
+                    try { missing = JSON.parse(j.missing_fields || '[]') } catch {}
+                    try { errors = JSON.parse(j.validation_errors || '[]') } catch {}
+                    return (
+                      <tr key={j.id}>
+                        <td>#{j.id}</td>
+                        <td style={{ fontSize:'.8rem' }}>{j.job_type}</td>
+                        <td>
+                          <span style={{ background: STATUS_BADGE[j.status] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:4, fontSize:'.72rem', whiteSpace:'nowrap' }}>
+                            {j.status.replace(/_/g,' ')}
+                          </span>
+                        </td>
+                        <td style={{ fontSize:'.75rem', color:'#fca5a5', maxWidth:160 }}>{missing.length > 0 ? missing.join(', ') : <span style={{ color:'#64748b' }}>—</span>}</td>
+                        <td style={{ fontSize:'.75rem', color:'#f87171', maxWidth:160 }}>{errors.length > 0 ? errors.join(', ') : <span style={{ color:'#64748b' }}>—</span>}</td>
+                        <td style={{ fontSize:'.8rem' }}>
+                          <span style={{ color: missing.length === 0 && errors.length === 0 ? '#22c55e' : '#f59e0b' }}>
+                            {missing.length === 0 && errors.length === 0 ? '✅ 100%' : `⚠ ${Math.max(0, 100 - missing.length*15)}%`}
+                          </span>
+                        </td>
+                        <td>
+                          {j.status === 'pending_admin_approval' && (
+                            <div style={{ display:'flex', gap:6 }}>
+                              <button className="btn btn-primary btn-sm" onClick={() => approveJob(j.id)} style={{ fontSize:'.72rem', padding:'3px 10px' }}>✅ Approve</button>
+                              <button className="btn btn-outline btn-sm" onClick={() => declineJob(j.id)} style={{ fontSize:'.72rem', padding:'3px 10px', color:'#ef4444', borderColor:'#ef4444' }}>✕ Decline</button>
+                            </div>
+                          )}
+                          {j.status === 'approved_ready_to_post' && <span style={{ color:'#22c55e', fontSize:'.75rem' }}>✅ Approved</span>}
+                          {j.status === 'declined_needs_revision' && <span style={{ color:'#ef4444', fontSize:'.75rem' }}>❌ Declined</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Patients ── */}
+      {panel === 'patients' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>👤 Patient Records</h3>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowPatForm(v => !v)}>+ Add Patient</button>
+          </div>
+          {showPatForm && (
+            <form onSubmit={savePatient} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <select className="input" value={patForm.business_id} onChange={e => setPatForm(f=>({...f,business_id:e.target.value}))} required>
+                <option value="">Business *</option>{businesses.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <div />
+              <input className="input" placeholder="First Name *" value={patForm.first_name} onChange={e=>setPatForm(f=>({...f,first_name:e.target.value}))} required />
+              <input className="input" placeholder="Last Name *" value={patForm.last_name} onChange={e=>setPatForm(f=>({...f,last_name:e.target.value}))} required />
+              <input className="input" placeholder="Date of Birth (MM/DD/YYYY)" value={patForm.date_of_birth} onChange={e=>setPatForm(f=>({...f,date_of_birth:e.target.value}))} />
+              <input className="input" placeholder="Phone" value={patForm.phone} onChange={e=>setPatForm(f=>({...f,phone:e.target.value}))} />
+              <input className="input" placeholder="Email" value={patForm.email} onChange={e=>setPatForm(f=>({...f,email:e.target.value}))} />
+              <select className="input" value={patForm.preferred_language} onChange={e=>setPatForm(f=>({...f,preferred_language:e.target.value}))}>
+                {[['en','English'],['es','Spanish'],['ur','Urdu'],['vi','Vietnamese'],['zh','Chinese'],['ar','Arabic'],['fr','French']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+              </select>
+              <input className="input" placeholder="Address" value={patForm.address} onChange={e=>setPatForm(f=>({...f,address:e.target.value}))} style={{gridColumn:'1/-1'}} />
+              <input className="input" placeholder="City" value={patForm.city} onChange={e=>setPatForm(f=>({...f,city:e.target.value}))} />
+              <input className="input" placeholder="State" value={patForm.state} onChange={e=>setPatForm(f=>({...f,state:e.target.value}))} />
+              <input className="input" placeholder="ZIP Code" value={patForm.zip_code} onChange={e=>setPatForm(f=>({...f,zip_code:e.target.value}))} />
+              <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
+                <button type="submit" className="btn btn-primary">Save Patient</button>
+                <button type="button" className="btn btn-outline" onClick={()=>setShowPatForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>DOB</th><th>Phone</th><th>Email</th><th>Language</th><th>Business</th></tr></thead>
+                <tbody>
+                  {patients.length === 0 && <tr><td colSpan={6} style={{textAlign:'center',color:'#64748b'}}>No patients yet</td></tr>}
+                  {patients.map(p => (
+                    <tr key={p.id}>
+                      <td>{p.first_name} {p.last_name}</td>
+                      <td style={{fontSize:'.8rem'}}>{p.date_of_birth || '—'}</td>
+                      <td>{p.phone || '—'}</td>
+                      <td style={{fontSize:'.8rem'}}>{p.email || '—'}</td>
+                      <td>{p.preferred_language}</td>
+                      <td style={{fontSize:'.8rem'}}>{businesses.find(b=>b.id===p.business_id)?.name||`#${p.business_id}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Equipment Requests ── */}
+      {panel === 'equipment' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>🦽 Equipment Requests</h3>
+            <button className="btn btn-primary btn-sm" onClick={()=>setShowEqForm(v=>!v)}>+ New Request</button>
+          </div>
+          {showEqForm && (
+            <form onSubmit={saveEquipment} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <select className="input" value={eqForm.business_id} onChange={e=>setEqForm(f=>({...f,business_id:e.target.value}))} required>
+                <option value="">Business *</option>{businesses.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <select className="input" value={eqForm.patient_id} onChange={e=>setEqForm(f=>({...f,patient_id:e.target.value}))}>
+                <option value="">Patient (optional)</option>{patients.map(p=><option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
+              </select>
+              <input className="input" placeholder="Equipment Type *" value={eqForm.equipment_type} onChange={e=>setEqForm(f=>({...f,equipment_type:e.target.value}))} required style={{gridColumn:'1/-1'}} />
+              <textarea className="input" placeholder="Diagnosis/Reason" value={eqForm.diagnosis_or_reason} onChange={e=>setEqForm(f=>({...f,diagnosis_or_reason:e.target.value}))} style={{gridColumn:'1/-1',minHeight:60}} />
+              <input className="input" placeholder="Prescribing Provider" value={eqForm.prescribing_provider} onChange={e=>setEqForm(f=>({...f,prescribing_provider:e.target.value}))} />
+              <input className="input" placeholder="HCPCS Codes (comma-separated)" value={eqForm.hcpcs_codes} onChange={e=>setEqForm(f=>({...f,hcpcs_codes:e.target.value}))} />
+              <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
+                <button type="submit" className="btn btn-primary">Submit Request</button>
+                <button type="button" className="btn btn-outline" onClick={()=>setShowEqForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Equipment</th><th>Patient</th><th>Provider</th><th>HCPCS</th><th>Insurance</th><th>Status</th></tr></thead>
+                <tbody>
+                  {equipment.length === 0 && <tr><td colSpan={6} style={{textAlign:'center',color:'#64748b'}}>No equipment requests yet</td></tr>}
+                  {equipment.map(r => (
+                    <tr key={r.id}>
+                      <td>{r.equipment_type}</td>
+                      <td style={{fontSize:'.8rem'}}>{r.patient_id ? `#${r.patient_id}` : '—'}</td>
+                      <td style={{fontSize:'.8rem'}}>{r.prescribing_provider || '—'}</td>
+                      <td style={{fontFamily:'monospace',fontSize:'.75rem'}}>{r.hcpcs_codes || '—'}</td>
+                      <td>{r.insurance_required ? '✅' : '—'}</td>
+                      <td><span style={{background:STATUS_BADGE[r.status]||'#334155',color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:'.72rem'}}>{r.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Bookkeeping ── */}
+      {panel === 'bookkeeping' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>📒 Bookkeeping Entries</h3>
+            <button className="btn btn-primary btn-sm" onClick={()=>setShowBkForm(v=>!v)}>+ Add Entry</button>
+          </div>
+          {showBkForm && (
+            <form onSubmit={saveBookkeeping} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <select className="input" value={bkForm.business_id} onChange={e=>setBkForm(f=>({...f,business_id:e.target.value}))} required>
+                <option value="">Business *</option>{businesses.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <select className="input" value={bkForm.entry_type} onChange={e=>setBkForm(f=>({...f,entry_type:e.target.value}))}>
+                <option value="invoice">Invoice</option><option value="receipt">Receipt</option>
+                <option value="expense">Expense</option><option value="revenue">Revenue</option>
+              </select>
+              <input className="input" placeholder="Vendor / Customer *" value={bkForm.vendor_or_customer} onChange={e=>setBkForm(f=>({...f,vendor_or_customer:e.target.value}))} required />
+              <input className="input" placeholder="Transaction Date (MM/DD/YYYY)" value={bkForm.transaction_date} onChange={e=>setBkForm(f=>({...f,transaction_date:e.target.value}))} />
+              <input className="input" type="number" placeholder="Amount ($) *" value={bkForm.amount} onChange={e=>setBkForm(f=>({...f,amount:e.target.value}))} required />
+              <input className="input" placeholder="Category" value={bkForm.category} onChange={e=>setBkForm(f=>({...f,category:e.target.value}))} />
+              <textarea className="input" placeholder="Memo / Notes" value={bkForm.memo} onChange={e=>setBkForm(f=>({...f,memo:e.target.value}))} style={{gridColumn:'1/-1',minHeight:60}} />
+              <label style={{display:'flex',alignItems:'center',gap:8,color:'#cbd5e1',fontSize:'.85rem'}}>
+                <input type="checkbox" checked={bkForm.tax_flag} onChange={e=>setBkForm(f=>({...f,tax_flag:e.target.checked}))} />Tax-related entry
+              </label>
+              <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
+                <button type="submit" className="btn btn-primary">Save Draft</button>
+                <button type="button" className="btn btn-outline" onClick={()=>setShowBkForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Vendor/Customer</th><th>Type</th><th>Date</th><th>Amount</th><th>Category</th><th>Tax</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>
+                  {bookkeeping.length === 0 && <tr><td colSpan={8} style={{textAlign:'center',color:'#64748b'}}>No bookkeeping entries yet</td></tr>}
+                  {bookkeeping.map(e => (
+                    <tr key={e.id}>
+                      <td>{e.vendor_or_customer || '—'}</td>
+                      <td style={{fontSize:'.78rem'}}>{e.entry_type || '—'}</td>
+                      <td style={{fontSize:'.78rem'}}>{e.transaction_date || '—'}</td>
+                      <td style={{color:e.entry_type==='expense'?'#f87171':'#34d399',fontWeight:600}}>${e.amount?.toFixed(2)||'0.00'}</td>
+                      <td style={{fontSize:'.75rem'}}>{e.category || '—'}</td>
+                      <td>{e.tax_flag ? '✅' : '—'}</td>
+                      <td><span style={{background:STATUS_BADGE[e.status]||'#334155',color:'#fff',padding:'2px 8px',borderRadius:4,fontSize:'.72rem'}}>{e.status}</span></td>
+                      <td>
+                        {!e.admin_approved && (
+                          <button className="btn btn-primary btn-sm" onClick={()=>approveBk(e.id)} style={{fontSize:'.72rem',padding:'3px 8px'}}>✅ Approve</button>
+                        )}
+                        {e.admin_approved && <span style={{color:'#22c55e',fontSize:'.75rem'}}>Approved</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Audit Log ── */}
+      {panel === 'audit' && (
+        <div className="card">
+          <h3 style={{marginBottom:12}}>🔐 Audit Log</h3>
+          <p style={{color:'#94a3b8',fontSize:'.82rem',marginBottom:12}}>Immutable record of all admin actions on medical, insurance, and bookkeeping data.</p>
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Entity ID</th></tr></thead>
+                <tbody>
+                  {auditLogs.length === 0 && <tr><td colSpan={5} style={{textAlign:'center',color:'#64748b'}}>No audit logs yet</td></tr>}
+                  {auditLogs.map(l => (
+                    <tr key={l.id}>
+                      <td style={{fontSize:'.75rem',color:'#64748b',whiteSpace:'nowrap'}}>{new Date(l.created_at).toLocaleString()}</td>
+                      <td style={{fontSize:'.8rem',color:'#60a5fa'}}>{l.actor}</td>
+                      <td style={{fontSize:'.8rem'}}>{l.action.replace(/_/g,' ')}</td>
+                      <td style={{fontSize:'.75rem'}}>{l.entity_type || '—'}</td>
+                      <td style={{fontSize:'.75rem',fontFamily:'monospace'}}>{l.entity_id || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Healthcare Hub Tab ────────────────────────────────────────────────────────
 function HealthcareTab() {
   const [contacts, setContacts]   = useState([])
@@ -2797,6 +3387,7 @@ function AppInner() {
     { id: 'businesses',    label: t.tabs.businesses },
     { id: 'appointments',  label: t.tabs.appointments },
     { id: 'approval',      label: '📋 Approvals' },
+    { id: 'data-entry',    label: '📄 Data Entry AI' },
     { id: 'healthcare',    label: '🏥 Healthcare' },
     { id: 'marketplace',   label: '🏪 DME Market' },
     { id: 'agents',        label: '🤖 Agents' },
@@ -2876,6 +3467,7 @@ function AppInner() {
         {activeTab === 'businesses'    && <BusinessesTab />}
         {activeTab === 'appointments'  && <AppointmentsTab />}
         {activeTab === 'approval'      && <ApprovalQueueTab />}
+        {activeTab === 'data-entry'    && <DataEntryTab />}
         {activeTab === 'healthcare'    && <HealthcareTab />}
         {activeTab === 'marketplace'   && <DMEMarketplaceTab />}
         {activeTab === 'agents'        && <AgentsTab />}
