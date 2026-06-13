@@ -492,3 +492,231 @@ def config_status():
         "ai_configured": bool(settings.anthropic_api_key),
         "twilio_phone": settings.twilio_phone_number or None,
     }
+
+
+# ── Contacts ──────────────────────────────────────────────────────────────────
+
+@app.post("/contacts", response_model=schemas.ContactOut, status_code=201, tags=["contacts"])
+def create_contact(payload: schemas.ContactCreate, db: Session = Depends(get_db)):
+    if not db.get(models.Business, payload.business_id):
+        raise HTTPException(status_code=404, detail="Business not found.")
+    contact = models.Contact(**payload.model_dump())
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+    return contact
+
+
+@app.get("/contacts", response_model=List[schemas.ContactOut], tags=["contacts"])
+def list_contacts(
+    business_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Contact)
+    if business_id:
+        q = q.filter(models.Contact.business_id == business_id)
+    return q.order_by(models.Contact.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/contacts/{contact_id}", response_model=schemas.ContactOut, tags=["contacts"])
+def get_contact(contact_id: int, db: Session = Depends(get_db)):
+    c = db.get(models.Contact, contact_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    return c
+
+
+@app.put("/contacts/{contact_id}", response_model=schemas.ContactOut, tags=["contacts"])
+def update_contact(contact_id: int, payload: schemas.ContactUpdate, db: Session = Depends(get_db)):
+    c = db.get(models.Contact, contact_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(c, field, value)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@app.delete("/contacts/{contact_id}", tags=["contacts"])
+def delete_contact(contact_id: int, db: Session = Depends(get_db)):
+    c = db.get(models.Contact, contact_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    db.delete(c)
+    db.commit()
+    return {"detail": f"Contact {contact_id} deleted."}
+
+
+# ── Patient Intake ────────────────────────────────────────────────────────────
+
+@app.post("/patient-intake", response_model=schemas.PatientIntakeOut, status_code=201, tags=["healthcare"])
+def create_patient_intake(payload: schemas.PatientIntakeCreate, db: Session = Depends(get_db)):
+    if not db.get(models.Contact, payload.contact_id):
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    existing = db.query(models.PatientIntake).filter(
+        models.PatientIntake.contact_id == payload.contact_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Intake form already exists for this contact.")
+    intake = models.PatientIntake(**payload.model_dump())
+    db.add(intake)
+    db.commit()
+    db.refresh(intake)
+    return intake
+
+
+@app.get("/patient-intake", response_model=List[schemas.PatientIntakeOut], tags=["healthcare"])
+def list_patient_intakes(
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.PatientIntake)
+    if status:
+        q = q.filter(models.PatientIntake.status == status)
+    return q.order_by(models.PatientIntake.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/patient-intake/{intake_id}", response_model=schemas.PatientIntakeOut, tags=["healthcare"])
+def get_patient_intake(intake_id: int, db: Session = Depends(get_db)):
+    intake = db.get(models.PatientIntake, intake_id)
+    if not intake:
+        raise HTTPException(status_code=404, detail="Intake not found.")
+    return intake
+
+
+@app.put("/patient-intake/{intake_id}", response_model=schemas.PatientIntakeOut, tags=["healthcare"])
+def update_patient_intake(intake_id: int, payload: schemas.PatientIntakeUpdate, db: Session = Depends(get_db)):
+    intake = db.get(models.PatientIntake, intake_id)
+    if not intake:
+        raise HTTPException(status_code=404, detail="Intake not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(intake, field, value)
+    db.commit()
+    db.refresh(intake)
+    return intake
+
+
+# ── Supplier Marketplace ──────────────────────────────────────────────────────
+
+@app.post("/supplier/products", response_model=schemas.SupplierProductOut, status_code=201, tags=["marketplace"])
+def create_supplier_product(payload: schemas.SupplierProductCreate, db: Session = Depends(get_db)):
+    product = models.SupplierProduct(**payload.model_dump())
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@app.get("/supplier/products", response_model=List[schemas.SupplierProductOut], tags=["marketplace"])
+def list_supplier_products(
+    category: Optional[str] = None,
+    available_only: bool = True,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.SupplierProduct)
+    if category:
+        q = q.filter(models.SupplierProduct.category == category)
+    if available_only:
+        q = q.filter(models.SupplierProduct.is_available == True)
+    return q.order_by(models.SupplierProduct.name).offset(skip).limit(limit).all()
+
+
+@app.put("/supplier/products/{product_id}", response_model=schemas.SupplierProductOut, tags=["marketplace"])
+def update_supplier_product(product_id: int, payload: schemas.SupplierProductUpdate, db: Session = Depends(get_db)):
+    product = db.get(models.SupplierProduct, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(product, field, value)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@app.delete("/supplier/products/{product_id}", tags=["marketplace"])
+def delete_supplier_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.get(models.SupplierProduct, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    db.delete(product)
+    db.commit()
+    return {"detail": f"Product {product_id} deleted."}
+
+
+# ── Agent Dispatch ────────────────────────────────────────────────────────────
+
+@app.get("/agents/roster", tags=["agents"])
+def get_agent_roster():
+    """List all 13 specialized agents with their status."""
+    from .agents import AGENT_REGISTRY
+    return [agent.to_dict() for agent in AGENT_REGISTRY.values()]
+
+
+@app.post("/agents/run", tags=["agents"])
+async def run_agent_task(payload: schemas.AgentRunRequest, db: Session = Depends(get_db)):
+    """Dispatch a task to a specialized agent and persist the result."""
+    from .agents import AGENT_REGISTRY
+    import json
+
+    agent = AGENT_REGISTRY.get(payload.agent_key)
+    if not agent:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{payload.agent_key}' not found. Available: {list(AGENT_REGISTRY.keys())}"
+        )
+
+    task_record = models.AgentTask(
+        agent_name=agent.name,
+        task_type=payload.task_type,
+        status="running",
+        input_data=json.dumps(payload.payload),
+    )
+    db.add(task_record)
+    db.commit()
+    db.refresh(task_record)
+
+    result = await agent.run(payload.task_type, payload.payload, db)
+
+    task_record.status = result["status"]
+    task_record.output_data = json.dumps(result.get("result", {}))
+    task_record.error_msg = result.get("error")
+    task_record.duration_ms = result.get("duration_ms")
+    task_record.completed_at = datetime.utcnow()
+    db.commit()
+
+    return {**result, "task_id": task_record.id}
+
+
+@app.get("/agents/tasks", response_model=List[schemas.AgentTaskOut], tags=["agents"])
+def list_agent_tasks(
+    agent_name: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.AgentTask)
+    if agent_name:
+        q = q.filter(models.AgentTask.agent_name == agent_name)
+    return q.order_by(models.AgentTask.created_at.desc()).offset(skip).limit(limit).all()
+
+
+# ── Call Logs ─────────────────────────────────────────────────────────────────
+
+@app.get("/call-logs", response_model=List[schemas.CallLogOut], tags=["call_logs"])
+def list_call_logs(
+    business_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.CallLog)
+    if business_id:
+        q = q.filter(models.CallLog.business_id == business_id)
+    return q.order_by(models.CallLog.created_at.desc()).offset(skip).limit(limit).all()

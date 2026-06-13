@@ -261,3 +261,181 @@ class ApprovalOut(BaseModel):
     appointment_id: int
     action: str
     message: str
+
+
+# ─── Contact Schemas ──────────────────────────────────────────────────────────
+
+class ContactCreate(BaseModel):
+    business_id:        int
+    first_name:         str
+    last_name:          str
+    email:              Optional[str] = None
+    phone:              Optional[str] = None
+    preferred_language: Optional[str] = "en"
+    consent_given:      Optional[bool] = False
+    tags:               Optional[str] = None
+    notes:              Optional[str] = None
+
+
+class ContactUpdate(BaseModel):
+    first_name:         Optional[str] = None
+    last_name:          Optional[str] = None
+    email:              Optional[str] = None
+    phone:              Optional[str] = None
+    preferred_language: Optional[str] = None
+    consent_given:      Optional[bool] = None
+    tags:               Optional[str] = None
+    notes:              Optional[str] = None
+
+
+class ContactOut(BaseModel):
+    id:                 int
+    business_id:        int
+    first_name:         str
+    last_name:          str
+    email:              Optional[str]
+    phone:              Optional[str]
+    preferred_language: str
+    consent_given:      bool
+    tags:               Optional[str]
+    notes:              Optional[str]
+    created_at:         datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Patient Intake Schemas ────────────────────────────────────────────────────
+
+class PatientIntakeCreate(BaseModel):
+    contact_id:          int
+    date_of_birth:       Optional[str] = None
+    gender:              Optional[str] = None
+    address:             Optional[str] = None
+    insurance_name:      Optional[str] = None
+    insurance_member_id: Optional[str] = None
+    insurance_group_no:  Optional[str] = None
+    secondary_insurance: Optional[str] = None
+    diagnosis_codes:     Optional[str] = None
+    equipment_needed:    Optional[str] = None
+    prescribing_doctor:  Optional[str] = None
+    npi_number:          Optional[str] = None
+
+
+class PatientIntakeUpdate(BaseModel):
+    date_of_birth:       Optional[str] = None
+    gender:              Optional[str] = None
+    address:             Optional[str] = None
+    insurance_name:      Optional[str] = None
+    insurance_member_id: Optional[str] = None
+    insurance_group_no:  Optional[str] = None
+    secondary_insurance: Optional[str] = None
+    diagnosis_codes:     Optional[str] = None
+    equipment_needed:    Optional[str] = None
+    prescribing_doctor:  Optional[str] = None
+    npi_number:          Optional[str] = None
+    status:              Optional[str] = None
+    ai_notes:            Optional[str] = None
+
+
+class PatientIntakeOut(BaseModel):
+    id:                  int
+    contact_id:          int
+    date_of_birth:       Optional[str]
+    gender:              Optional[str]
+    address:             Optional[str]
+    insurance_name:      Optional[str]
+    insurance_member_id: Optional[str]
+    insurance_group_no:  Optional[str]
+    secondary_insurance: Optional[str]
+    diagnosis_codes:     Optional[str]
+    equipment_needed:    Optional[str]
+    prescribing_doctor:  Optional[str]
+    npi_number:          Optional[str]
+    status:              str
+    ai_notes:            Optional[str]
+    created_at:          datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Supplier Product Schemas ──────────────────────────────────────────────────
+
+class SupplierProductCreate(BaseModel):
+    supplier_name:  str
+    supplier_email: Optional[str] = None
+    name:           str
+    category:       str
+    hcpcs_code:     Optional[str] = None
+    description:    Optional[str] = None
+    unit_price:     Optional[float] = None
+    is_available:   Optional[bool] = True
+    lead_time_days: Optional[int] = 1
+
+
+class SupplierProductUpdate(BaseModel):
+    supplier_name:  Optional[str] = None
+    supplier_email: Optional[str] = None
+    name:           Optional[str] = None
+    category:       Optional[str] = None
+    hcpcs_code:     Optional[str] = None
+    description:    Optional[str] = None
+    unit_price:     Optional[float] = None
+    is_available:   Optional[bool] = None
+    lead_time_days: Optional[int] = None
+
+
+class SupplierProductOut(BaseModel):
+    id:             int
+    supplier_name:  str
+    supplier_email: Optional[str]
+    name:           str
+    category:       str
+    hcpcs_code:     Optional[str]
+    description:    Optional[str]
+    unit_price:     Optional[float]
+    is_available:   bool
+    lead_time_days: int
+    created_at:     datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Agent Task Schemas ────────────────────────────────────────────────────────
+
+class AgentRunRequest(BaseModel):
+    agent_key:  str   # key from AGENT_REGISTRY, e.g. "intake"
+    task_type:  str
+    payload:    dict
+
+
+class AgentTaskOut(BaseModel):
+    id:           int
+    agent_name:   str
+    task_type:    str
+    status:       str
+    input_data:   Optional[str]
+    output_data:  Optional[str]
+    error_msg:    Optional[str]
+    duration_ms:  Optional[int]
+    created_at:   datetime
+    completed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Call Log Schemas ──────────────────────────────────────────────────────────
+
+class CallLogOut(BaseModel):
+    id:             int
+    business_id:    Optional[int]
+    call_sid:       Optional[str]
+    direction:      str
+    caller_phone:   Optional[str]
+    called_phone:   Optional[str]
+    duration_secs:  Optional[int]
+    status:         str
+    ai_summary:     Optional[str]
+    appointment_id: Optional[int]
+    created_at:     datetime
+
+    model_config = {"from_attributes": True}

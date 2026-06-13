@@ -1583,6 +1583,499 @@ function authFetch(path, token, options = {}) {
   })
 }
 
+// ── Healthcare Hub Tab ────────────────────────────────────────────────────────
+function HealthcareTab() {
+  const [contacts, setContacts]   = useState([])
+  const [intakes, setIntakes]     = useState([])
+  const [businesses, setBusinesses] = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [panel, setPanel]         = useState('contacts') // contacts | intake | verify
+  const [showForm, setShowForm]   = useState(false)
+
+  // Contact form
+  const [cForm, setCForm] = useState({ business_id: '', first_name: '', last_name: '', email: '', phone: '', preferred_language: 'en', consent_given: false })
+  // Intake form
+  const [iForm, setIForm] = useState({ contact_id: '', date_of_birth: '', gender: '', insurance_name: '', insurance_member_id: '', insurance_group_no: '', diagnosis_codes: '', equipment_needed: '', prescribing_doctor: '' })
+  // Insurance AI
+  const [verifyForm, setVerifyForm] = useState({ insurance_name: '', member_id: '', service: 'DME' })
+  const [verifyResult, setVerifyResult] = useState('')
+  const [verifying, setVerifying] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [c, i, b] = await Promise.all([
+        apiFetch('/contacts'),
+        apiFetch('/patient-intake'),
+        apiFetch('/businesses'),
+      ])
+      setContacts(c); setIntakes(i); setBusinesses(b)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const saveContact = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/contacts', { method: 'POST', body: JSON.stringify({ ...cForm, business_id: Number(cForm.business_id) }) })
+      setCForm({ business_id: '', first_name: '', last_name: '', email: '', phone: '', preferred_language: 'en', consent_given: false })
+      setShowForm(false); load()
+    } catch (e) { setError(e.message) }
+  }
+
+  const saveIntake = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/patient-intake', { method: 'POST', body: JSON.stringify({ ...iForm, contact_id: Number(iForm.contact_id) }) })
+      setIForm({ contact_id: '', date_of_birth: '', gender: '', insurance_name: '', insurance_member_id: '', insurance_group_no: '', diagnosis_codes: '', equipment_needed: '', prescribing_doctor: '' })
+      setShowForm(false); load()
+    } catch (e) { setError(e.message) }
+  }
+
+  const runVerify = async (e) => {
+    e.preventDefault(); setVerifyResult(''); setVerifying(true)
+    try {
+      const res = await apiFetch('/agents/run', {
+        method: 'POST',
+        body: JSON.stringify({ agent_key: 'insurance_verification', task_type: 'check_eligibility', payload: verifyForm }),
+      })
+      setVerifyResult(res.result?.verification_steps || JSON.stringify(res.result))
+    } catch (e) { setError(e.message) }
+    finally { setVerifying(false) }
+  }
+
+  const STATUS_COLOR = { pending: '#f59e0b', verified: '#3b82f6', approved: '#22c55e', denied: '#ef4444' }
+
+  return (
+    <div>
+      <Alert msg={error} type="error" />
+      <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+        {['contacts','intake','verify'].map(p => (
+          <button key={p} className={`tab-btn ${panel===p?'active':''}`} style={{ fontSize:'.8rem', padding:'6px 14px' }} onClick={() => { setPanel(p); setShowForm(false) }}>
+            {p === 'contacts' ? '👥 Contacts' : p === 'intake' ? '📋 Patient Intake' : '🔒 Insurance Verify'}
+          </button>
+        ))}
+      </div>
+
+      {/* Contacts */}
+      {panel === 'contacts' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>Patient / Lead Contacts</h3>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowForm(v => !v)}>+ Add Contact</button>
+          </div>
+          {showForm && (
+            <form onSubmit={saveContact} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <select value={cForm.business_id} onChange={e => setCForm(f => ({...f, business_id: e.target.value}))} required className="input">
+                <option value="">Select Business *</option>
+                {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              <input className="input" placeholder="First Name *" value={cForm.first_name} onChange={e => setCForm(f => ({...f, first_name: e.target.value}))} required />
+              <input className="input" placeholder="Last Name *" value={cForm.last_name} onChange={e => setCForm(f => ({...f, last_name: e.target.value}))} required />
+              <input className="input" placeholder="Email" value={cForm.email} onChange={e => setCForm(f => ({...f, email: e.target.value}))} />
+              <input className="input" placeholder="Phone" value={cForm.phone} onChange={e => setCForm(f => ({...f, phone: e.target.value}))} />
+              <select className="input" value={cForm.preferred_language} onChange={e => setCForm(f => ({...f, preferred_language: e.target.value}))}>
+                {[['en','English'],['es','Spanish'],['ur','Urdu'],['vi','Vietnamese'],['zh','Chinese'],['fr','French'],['ar','Arabic']].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <label style={{ display:'flex', alignItems:'center', gap:8, color:'#cbd5e1', fontSize:'.85rem', gridColumn:'1/-1' }}>
+                <input type="checkbox" checked={cForm.consent_given} onChange={e => setCForm(f => ({...f, consent_given: e.target.checked}))} />
+                HIPAA Consent Obtained
+              </label>
+              <div style={{ gridColumn:'1/-1', display:'flex', gap:8 }}>
+                <button type="submit" className="btn btn-primary">Save Contact</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Name</th><th>Business</th><th>Phone</th><th>Email</th><th>Language</th><th>Consent</th></tr></thead>
+                <tbody>
+                  {contacts.length === 0 && <tr><td colSpan={6} style={{ textAlign:'center', color:'#64748b' }}>No contacts yet</td></tr>}
+                  {contacts.map(c => (
+                    <tr key={c.id}>
+                      <td>{c.first_name} {c.last_name}</td>
+                      <td>{businesses.find(b => b.id === c.business_id)?.name || c.business_id}</td>
+                      <td>{c.phone || '—'}</td>
+                      <td>{c.email || '—'}</td>
+                      <td>{c.preferred_language}</td>
+                      <td>{c.consent_given ? '✅' : '❌'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Patient Intake */}
+      {panel === 'intake' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>Patient Intake Forms (DME / Healthcare)</h3>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowForm(v => !v)}>+ New Intake</button>
+          </div>
+          {showForm && (
+            <form onSubmit={saveIntake} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <select className="input" value={iForm.contact_id} onChange={e => setIForm(f => ({...f, contact_id: e.target.value}))} required style={{ gridColumn:'1/-1' }}>
+                <option value="">Select Contact *</option>
+                {contacts.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name} — {c.phone || c.email || `#${c.id}`}</option>)}
+              </select>
+              <input className="input" placeholder="Date of Birth (YYYY-MM-DD)" value={iForm.date_of_birth} onChange={e => setIForm(f => ({...f, date_of_birth: e.target.value}))} />
+              <select className="input" value={iForm.gender} onChange={e => setIForm(f => ({...f, gender: e.target.value}))}>
+                <option value="">Gender</option>
+                <option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option>
+              </select>
+              <input className="input" placeholder="Insurance Name" value={iForm.insurance_name} onChange={e => setIForm(f => ({...f, insurance_name: e.target.value}))} />
+              <input className="input" placeholder="Member ID" value={iForm.insurance_member_id} onChange={e => setIForm(f => ({...f, insurance_member_id: e.target.value}))} />
+              <input className="input" placeholder="Group No." value={iForm.insurance_group_no} onChange={e => setIForm(f => ({...f, insurance_group_no: e.target.value}))} />
+              <input className="input" placeholder="Diagnosis Codes (ICD-10, comma-separated)" value={iForm.diagnosis_codes} onChange={e => setIForm(f => ({...f, diagnosis_codes: e.target.value}))} style={{ gridColumn:'1/-1' }} />
+              <input className="input" placeholder="Equipment Needed (e.g. CPAP, wheelchair)" value={iForm.equipment_needed} onChange={e => setIForm(f => ({...f, equipment_needed: e.target.value}))} style={{ gridColumn:'1/-1' }} />
+              <input className="input" placeholder="Prescribing Doctor" value={iForm.prescribing_doctor} onChange={e => setIForm(f => ({...f, prescribing_doctor: e.target.value}))} />
+              <div style={{ display:'flex', gap:8, gridColumn:'1/-1' }}>
+                <button type="submit" className="btn btn-primary">Submit Intake</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Contact #</th><th>Insurance</th><th>Member ID</th><th>Equipment</th><th>Diagnosis</th><th>Status</th></tr></thead>
+                <tbody>
+                  {intakes.length === 0 && <tr><td colSpan={6} style={{ textAlign:'center', color:'#64748b' }}>No intakes yet</td></tr>}
+                  {intakes.map(i => (
+                    <tr key={i.id}>
+                      <td>#{i.contact_id}</td>
+                      <td>{i.insurance_name || '—'}</td>
+                      <td>{i.insurance_member_id || '—'}</td>
+                      <td>{i.equipment_needed || '—'}</td>
+                      <td style={{ fontSize:'.75rem' }}>{i.diagnosis_codes || '—'}</td>
+                      <td><span style={{ background: STATUS_COLOR[i.status] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:4, fontSize:'.73rem' }}>{i.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Insurance Verification */}
+      {panel === 'verify' && (
+        <div className="card">
+          <h3 style={{ marginBottom:16 }}>🔒 AI Insurance Verification</h3>
+          <p style={{ color:'#94a3b8', marginBottom:16, fontSize:'.85rem' }}>Enter patient insurance details and our AI agent will provide verification steps and eligibility guidance.</p>
+          <form onSubmit={runVerify} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', maxWidth:600 }}>
+            <input className="input" placeholder="Insurance Name (e.g. Aetna, Medicare)" value={verifyForm.insurance_name} onChange={e => setVerifyForm(f => ({...f, insurance_name: e.target.value}))} required />
+            <input className="input" placeholder="Member ID" value={verifyForm.member_id} onChange={e => setVerifyForm(f => ({...f, member_id: e.target.value}))} required />
+            <input className="input" placeholder="Service (e.g. CPAP, wheelchair)" value={verifyForm.service} onChange={e => setVerifyForm(f => ({...f, service: e.target.value}))} style={{ gridColumn:'1/-1' }} />
+            <button type="submit" className="btn btn-primary" disabled={verifying} style={{ gridColumn:'1/-1' }}>
+              {verifying ? '🔄 Checking…' : '🔒 Verify Eligibility'}
+            </button>
+          </form>
+          {verifyResult && (
+            <div style={{ marginTop:20, background:'#0f172a', border:'1px solid #1e40af', borderRadius:8, padding:16 }}>
+              <h4 style={{ color:'#60a5fa', marginBottom:8 }}>Verification Steps</h4>
+              <pre style={{ color:'#e2e8f0', whiteSpace:'pre-wrap', fontSize:'.82rem', fontFamily:'inherit', margin:0 }}>{verifyResult}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── DME Marketplace Tab ───────────────────────────────────────────────────────
+function DMEMarketplaceTab() {
+  const [products, setProducts]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [showForm, setShowForm]   = useState(false)
+  const [filterCat, setFilterCat] = useState('')
+  const [matchForm, setMatchForm] = useState({ diagnosis: '', equipment_needed: '' })
+  const [matchResult, setMatchResult] = useState('')
+  const [matching, setMatching]   = useState(false)
+  const [panel, setPanel]         = useState('products') // products | match
+
+  const [form, setForm] = useState({
+    supplier_name: '', supplier_email: '', name: '', category: '',
+    hcpcs_code: '', description: '', unit_price: '', lead_time_days: 1
+  })
+
+  const CATEGORIES = ['mobility', 'respiratory', 'wound_care', 'orthotics', 'bathroom_safety', 'hospital_beds', 'diabetic', 'other']
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const url = filterCat ? `/supplier/products?category=${filterCat}` : '/supplier/products'
+      setProducts(await apiFetch(url))
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [filterCat])
+
+  const saveProduct = async (e) => {
+    e.preventDefault(); setError('')
+    try {
+      await apiFetch('/supplier/products', {
+        method: 'POST',
+        body: JSON.stringify({ ...form, unit_price: form.unit_price ? Number(form.unit_price) : null, lead_time_days: Number(form.lead_time_days) })
+      })
+      setForm({ supplier_name: '', supplier_email: '', name: '', category: '', hcpcs_code: '', description: '', unit_price: '', lead_time_days: 1 })
+      setShowForm(false); load()
+    } catch (e) { setError(e.message) }
+  }
+
+  const runMatch = async (e) => {
+    e.preventDefault(); setMatchResult(''); setMatching(true)
+    try {
+      const res = await apiFetch('/agents/run', {
+        method: 'POST',
+        body: JSON.stringify({ agent_key: 'dme_product_matching', task_type: 'match_products', payload: matchForm }),
+      })
+      setMatchResult(res.result?.recommendations || JSON.stringify(res.result))
+    } catch (e) { setError(e.message) }
+    finally { setMatching(false) }
+  }
+
+  return (
+    <div>
+      <Alert msg={error} type="error" />
+      <div style={{ display:'flex', gap:10, marginBottom:16 }}>
+        {['products','match'].map(p => (
+          <button key={p} className={`tab-btn ${panel===p?'active':''}`} style={{ fontSize:'.8rem', padding:'6px 14px' }} onClick={() => setPanel(p)}>
+            {p === 'products' ? '🏪 Supplier Products' : '🦽 AI Product Matching'}
+          </button>
+        ))}
+      </div>
+
+      {/* Products */}
+      {panel === 'products' && (
+        <div className="card">
+          <div className="card-header">
+            <h3>DME Supplier Marketplace</h3>
+            <div style={{ display:'flex', gap:8 }}>
+              <select className="input" style={{ width:'auto', fontSize:'.8rem', padding:'4px 8px' }} value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+                <option value="">All Categories</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
+              </select>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowForm(v => !v)}>+ Add Product</button>
+            </div>
+          </div>
+
+          {showForm && (
+            <form onSubmit={saveProduct} style={{ display:'grid', gap:10, gridTemplateColumns:'1fr 1fr', marginBottom:20 }}>
+              <input className="input" placeholder="Supplier Name *" value={form.supplier_name} onChange={e => setForm(f => ({...f, supplier_name: e.target.value}))} required />
+              <input className="input" placeholder="Supplier Email" value={form.supplier_email} onChange={e => setForm(f => ({...f, supplier_email: e.target.value}))} />
+              <input className="input" placeholder="Product Name *" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} required style={{ gridColumn:'1/-1' }} />
+              <select className="input" value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))} required>
+                <option value="">Category *</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c.replace(/_/g,' ')}</option>)}
+              </select>
+              <input className="input" placeholder="HCPCS Code (e.g. E0601)" value={form.hcpcs_code} onChange={e => setForm(f => ({...f, hcpcs_code: e.target.value}))} />
+              <input className="input" placeholder="Unit Price ($)" type="number" step="0.01" value={form.unit_price} onChange={e => setForm(f => ({...f, unit_price: e.target.value}))} />
+              <input className="input" placeholder="Lead Time (days)" type="number" value={form.lead_time_days} onChange={e => setForm(f => ({...f, lead_time_days: e.target.value}))} />
+              <textarea className="input" placeholder="Description" value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} style={{ gridColumn:'1/-1', minHeight:60 }} />
+              <div style={{ gridColumn:'1/-1', display:'flex', gap:8 }}>
+                <button type="submit" className="btn btn-primary">Save Product</button>
+                <button type="button" className="btn btn-outline" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </form>
+          )}
+
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Product</th><th>Category</th><th>HCPCS</th><th>Supplier</th><th>Price</th><th>Lead Time</th><th>Available</th></tr></thead>
+                <tbody>
+                  {products.length === 0 && <tr><td colSpan={7} style={{ textAlign:'center', color:'#64748b' }}>No products yet. Add your first supplier product above.</td></tr>}
+                  {products.map(p => (
+                    <tr key={p.id}>
+                      <td>{p.name}</td>
+                      <td style={{ fontSize:'.75rem' }}>{p.category.replace(/_/g,' ')}</td>
+                      <td style={{ fontFamily:'monospace', fontSize:'.8rem' }}>{p.hcpcs_code || '—'}</td>
+                      <td>{p.supplier_name}</td>
+                      <td>{p.unit_price ? `$${p.unit_price.toFixed(2)}` : '—'}</td>
+                      <td>{p.lead_time_days}d</td>
+                      <td>{p.is_available ? '✅' : '❌'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI Product Matching */}
+      {panel === 'match' && (
+        <div className="card">
+          <h3 style={{ marginBottom:8 }}>🦽 AI DME Product Matching</h3>
+          <p style={{ color:'#94a3b8', marginBottom:16, fontSize:'.85rem' }}>Enter patient diagnosis and equipment need — the AI will recommend matching DME products and HCPCS codes.</p>
+          <form onSubmit={runMatch} style={{ display:'grid', gap:10, maxWidth:600 }}>
+            <input className="input" placeholder="Diagnosis (e.g. COPD, paraplegia)" value={matchForm.diagnosis} onChange={e => setMatchForm(f => ({...f, diagnosis: e.target.value}))} required />
+            <input className="input" placeholder="Equipment needed (e.g. CPAP machine, power wheelchair)" value={matchForm.equipment_needed} onChange={e => setMatchForm(f => ({...f, equipment_needed: e.target.value}))} required />
+            <button type="submit" className="btn btn-primary" disabled={matching}>{matching ? '🔄 Matching…' : '🦽 Find Products'}</button>
+          </form>
+          {matchResult && (
+            <div style={{ marginTop:20, background:'#0f172a', border:'1px solid #0f766e', borderRadius:8, padding:16 }}>
+              <h4 style={{ color:'#2dd4bf', marginBottom:8 }}>Product Recommendations</h4>
+              <pre style={{ color:'#e2e8f0', whiteSpace:'pre-wrap', fontSize:'.82rem', fontFamily:'inherit', margin:0 }}>{matchResult}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Agents Roster Tab ─────────────────────────────────────────────────────────
+function AgentsTab() {
+  const [roster, setRoster]       = useState([])
+  const [tasks, setTasks]         = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [panel, setPanel]         = useState('roster')
+  const [runForm, setRunForm]     = useState({ agent_key: '', task_type: '', payload_json: '{}' })
+  const [running, setRunning]     = useState(false)
+  const [runResult, setRunResult] = useState(null)
+
+  const CATEGORY_COLOR = {
+    operations:'#3b82f6', communication:'#8b5cf6', sales:'#f59e0b',
+    finance:'#22c55e', marketing:'#ec4899', technology:'#06b6d4',
+    media:'#f97316', healthcare:'#14b8a6', marketplace:'#6366f1',
+    compliance:'#ef4444', general:'#64748b',
+  }
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [r, t] = await Promise.all([apiFetch('/agents/roster'), apiFetch('/agents/tasks')])
+      setRoster(r); setTasks(t)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const runTask = async (e) => {
+    e.preventDefault(); setError(''); setRunResult(null); setRunning(true)
+    try {
+      const payload = JSON.parse(runForm.payload_json)
+      const res = await apiFetch('/agents/run', {
+        method: 'POST',
+        body: JSON.stringify({ agent_key: runForm.agent_key, task_type: runForm.task_type, payload }),
+      })
+      setRunResult(res); load()
+    } catch (e) { setError(e.message) }
+    finally { setRunning(false) }
+  }
+
+  return (
+    <div>
+      <Alert msg={error} type="error" />
+      <div style={{ display:'flex', gap:10, marginBottom:16 }}>
+        {['roster','run','history'].map(p => (
+          <button key={p} className={`tab-btn ${panel===p?'active':''}`} style={{ fontSize:'.8rem', padding:'6px 14px' }} onClick={() => setPanel(p)}>
+            {p === 'roster' ? '🤖 All 13 Agents' : p === 'run' ? '⚡ Run Agent Task' : '📜 Task History'}
+          </button>
+        ))}
+      </div>
+
+      {/* Roster */}
+      {panel === 'roster' && (
+        <div>
+          {loading ? <Spinner /> : (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:14 }}>
+              {roster.map((a, i) => (
+                <div key={i} style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:10, padding:16, position:'relative', overflow:'hidden' }}>
+                  <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background: CATEGORY_COLOR[a.category] || '#64748b' }} />
+                  <div style={{ fontSize:'1.8rem', marginBottom:6 }}>{a.icon}</div>
+                  <div style={{ fontWeight:600, color:'#f1f5f9', marginBottom:4, fontSize:'.9rem' }}>{a.name}</div>
+                  <div style={{ fontSize:'.75rem', color:'#94a3b8', marginBottom:8 }}>{a.description}</div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <span style={{ background: CATEGORY_COLOR[a.category] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:'.68rem' }}>{a.category}</span>
+                    <span style={{ background: a.status === 'active' ? '#22c55e' : a.status === 'maintenance' ? '#f59e0b' : '#334155', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:'.68rem' }}>
+                      {a.status === 'active' ? '✅ Active' : a.status === 'coming_soon' ? '🔜 Soon' : '🔧 Maintenance'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Run task */}
+      {panel === 'run' && (
+        <div className="card" style={{ maxWidth:600 }}>
+          <h3 style={{ marginBottom:12 }}>⚡ Dispatch Agent Task</h3>
+          <form onSubmit={runTask} style={{ display:'grid', gap:10 }}>
+            <select className="input" value={runForm.agent_key} onChange={e => setRunForm(f => ({...f, agent_key: e.target.value}))} required>
+              <option value="">Select Agent *</option>
+              {roster.filter(a => a.status === 'active').map(a => (
+                <option key={a.name} value={a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'')}>{a.icon} {a.name}</option>
+              ))}
+            </select>
+            <input className="input" placeholder="Task Type (e.g. triage, qualify_lead, generate_copy)" value={runForm.task_type} onChange={e => setRunForm(f => ({...f, task_type: e.target.value}))} required />
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.8rem' }}>Payload (JSON)</label>
+              <textarea className="input" style={{ fontFamily:'monospace', fontSize:'.8rem', minHeight:80 }} value={runForm.payload_json} onChange={e => setRunForm(f => ({...f, payload_json: e.target.value}))} required />
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={running}>{running ? '🔄 Running…' : '⚡ Run Task'}</button>
+          </form>
+          {runResult && (
+            <div style={{ marginTop:20, background:'#0f172a', border:'1px solid #0f766e', borderRadius:8, padding:16 }}>
+              <div style={{ display:'flex', gap:8, marginBottom:8, flexWrap:'wrap' }}>
+                <span style={{ background: runResult.status === 'success' ? '#22c55e' : '#ef4444', color:'#fff', padding:'2px 10px', borderRadius:12, fontSize:'.75rem' }}>{runResult.status}</span>
+                <span style={{ color:'#64748b', fontSize:'.75rem' }}>{runResult.duration_ms}ms</span>
+                {runResult.task_id && <span style={{ color:'#64748b', fontSize:'.75rem' }}>Task #{runResult.task_id}</span>}
+              </div>
+              <pre style={{ color:'#e2e8f0', whiteSpace:'pre-wrap', fontSize:'.8rem', fontFamily:'inherit', margin:0 }}>
+                {JSON.stringify(runResult.result || runResult.error, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* History */}
+      {panel === 'history' && (
+        <div className="card">
+          <h3 style={{ marginBottom:12 }}>📜 Agent Task History</h3>
+          {loading ? <Spinner /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>#</th><th>Agent</th><th>Task</th><th>Status</th><th>Duration</th><th>Created</th></tr></thead>
+                <tbody>
+                  {tasks.length === 0 && <tr><td colSpan={6} style={{ textAlign:'center', color:'#64748b' }}>No tasks yet. Run a task to see history.</td></tr>}
+                  {tasks.map(t => (
+                    <tr key={t.id}>
+                      <td>#{t.id}</td>
+                      <td style={{ fontSize:'.8rem' }}>{t.agent_name}</td>
+                      <td style={{ fontSize:'.8rem' }}>{t.task_type}</td>
+                      <td><span style={{ background: t.status === 'success' ? '#22c55e' : t.status === 'error' ? '#ef4444' : '#f59e0b', color:'#fff', padding:'2px 8px', borderRadius:4, fontSize:'.72rem' }}>{t.status}</span></td>
+                      <td style={{ fontSize:'.8rem' }}>{t.duration_ms ? `${t.duration_ms}ms` : '—'}</td>
+                      <td style={{ fontSize:'.75rem', color:'#64748b' }}>{new Date(t.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Auth Modal (Login + Register) ─────────────────────────────────────────────
 function AuthModal({ onClose }) {
   const { login } = useAuth()
@@ -2304,6 +2797,9 @@ function AppInner() {
     { id: 'businesses',    label: t.tabs.businesses },
     { id: 'appointments',  label: t.tabs.appointments },
     { id: 'approval',      label: '📋 Approvals' },
+    { id: 'healthcare',    label: '🏥 Healthcare' },
+    { id: 'marketplace',   label: '🏪 DME Market' },
+    { id: 'agents',        label: '🤖 Agents' },
     { id: 'commander',     label: '🧠 Commander AI' },
     { id: 'ai',            label: t.tabs.ai },
     { id: 'subscriptions', label: '💎 Pricing' },
@@ -2380,6 +2876,9 @@ function AppInner() {
         {activeTab === 'businesses'    && <BusinessesTab />}
         {activeTab === 'appointments'  && <AppointmentsTab />}
         {activeTab === 'approval'      && <ApprovalQueueTab />}
+        {activeTab === 'healthcare'    && <HealthcareTab />}
+        {activeTab === 'marketplace'   && <DMEMarketplaceTab />}
+        {activeTab === 'agents'        && <AgentsTab />}
         {activeTab === 'commander'     && <CommanderTab />}
         {activeTab === 'ai'            && <AIAnalyzerTab />}
         {activeTab === 'subscriptions' && <SubscriptionsTab />}

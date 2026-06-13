@@ -116,3 +116,101 @@ class ApprovalToken(Base):
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
 
     appointment = relationship("Appointment", back_populates="approval_token")
+
+
+# ── Healthcare / DME / Multi-tenant Models ───────────────────────────────────
+
+class Contact(Base):
+    """Patient or lead contact record (multi-tenant, linked to a business)."""
+    __tablename__ = "contacts"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    business_id        = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    first_name         = Column(String(100), nullable=False)
+    last_name          = Column(String(100), nullable=False)
+    email              = Column(String(200), nullable=True, index=True)
+    phone              = Column(String(30), nullable=True)
+    preferred_language = Column(String(20), default="en")
+    consent_date       = Column(DateTime(timezone=True), nullable=True)
+    consent_given      = Column(Boolean, default=False)
+    tags               = Column(String(300), nullable=True)
+    notes              = Column(Text, nullable=True)
+    created_at         = Column(DateTime(timezone=True), server_default=func.now())
+
+    business       = relationship("Business")
+    patient_intake = relationship("PatientIntake", back_populates="contact", uselist=False)
+
+
+class PatientIntake(Base):
+    """Healthcare / DME patient intake form."""
+    __tablename__ = "patient_intakes"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    contact_id          = Column(Integer, ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, unique=True)
+    date_of_birth       = Column(String(20), nullable=True)
+    gender              = Column(String(20), nullable=True)
+    address             = Column(String(300), nullable=True)
+    insurance_name      = Column(String(200), nullable=True)
+    insurance_member_id = Column(String(100), nullable=True)
+    insurance_group_no  = Column(String(100), nullable=True)
+    secondary_insurance = Column(String(200), nullable=True)
+    diagnosis_codes     = Column(String(300), nullable=True)
+    equipment_needed    = Column(String(300), nullable=True)
+    prescribing_doctor  = Column(String(200), nullable=True)
+    npi_number          = Column(String(20), nullable=True)
+    status              = Column(String(30), default="pending")
+    ai_notes            = Column(Text, nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at          = Column(DateTime(timezone=True), onupdate=func.now())
+
+    contact = relationship("Contact", back_populates="patient_intake")
+
+
+class SupplierProduct(Base):
+    """DME product listed by a supplier in the marketplace."""
+    __tablename__ = "supplier_products"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    supplier_name   = Column(String(200), nullable=False)
+    supplier_email  = Column(String(200), nullable=True)
+    name            = Column(String(300), nullable=False, index=True)
+    category        = Column(String(100), nullable=False)
+    hcpcs_code      = Column(String(20), nullable=True)
+    description     = Column(Text, nullable=True)
+    unit_price      = Column(Float, nullable=True)
+    is_available    = Column(Boolean, default=True)
+    lead_time_days  = Column(Integer, default=1)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentTask(Base):
+    """Persisted log of every task dispatched to a specialized agent."""
+    __tablename__ = "agent_tasks"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    agent_name   = Column(String(100), nullable=False, index=True)
+    task_type    = Column(String(100), nullable=False)
+    status       = Column(String(20), default="pending")
+    input_data   = Column(Text, nullable=True)
+    output_data  = Column(Text, nullable=True)
+    error_msg    = Column(Text, nullable=True)
+    duration_ms  = Column(Integer, nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CallLog(Base):
+    """Inbound/outbound call record."""
+    __tablename__ = "call_logs"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    business_id    = Column(Integer, ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True)
+    call_sid       = Column(String(64), unique=True, nullable=True, index=True)
+    direction      = Column(String(10), default="inbound")
+    caller_phone   = Column(String(30), nullable=True)
+    called_phone   = Column(String(30), nullable=True)
+    duration_secs  = Column(Integer, nullable=True)
+    status         = Column(String(20), default="in-progress")
+    ai_summary     = Column(Text, nullable=True)
+    appointment_id = Column(Integer, ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
