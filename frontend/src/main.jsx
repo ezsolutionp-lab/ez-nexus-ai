@@ -3347,6 +3347,1328 @@ function LangSwitcher() {
   )
 }
 
+// ── CRM & Sales Tab ───────────────────────────────────────────────────────────
+function CRMTab() {
+  const { token } = useAuth()
+  const [panel, setPanel]   = useState('leads')
+  const [leads, setLeads]   = useState([])
+  const [deals, setDeals]   = useState([])
+  const [quotes, setQuotes] = useState([])
+  const [stats, setStats]   = useState(null)
+  const [form, setForm]     = useState({})
+  const [dealForm, setDealForm] = useState({})
+  const [msg, setMsg]       = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [l, d, q, s] = await Promise.all([
+        apiFetch('/crm/leads?limit=50', { headers: authH }),
+        apiFetch('/crm/deals?limit=50', { headers: authH }),
+        apiFetch('/crm/quotes?limit=50', { headers: authH }),
+        apiFetch('/crm/stats', { headers: authH }),
+      ])
+      setLeads(l); setDeals(d); setQuotes(q); setStats(s)
+    } catch (e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadData() }, [panel])
+
+  async function createLead(e) {
+    e.preventDefault()
+    setMsg('')
+    try {
+      await apiFetch('/crm/leads', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...form }) })
+      setMsg('Lead created! AI scoring in progress...')
+      setForm({})
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function updateLeadStatus(id, status) {
+    try {
+      await apiFetch(`/crm/leads/${id}`, { method:'PUT', headers: authH, body: JSON.stringify({ status }) })
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function createDeal(e) {
+    e.preventDefault()
+    setMsg('')
+    try {
+      await apiFetch('/crm/deals', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...dealForm }) })
+      setMsg('Deal created!')
+      setDealForm({})
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  const statusColors = { new:'#3b82f6', contacted:'#f59e0b', qualified:'#10b981', unqualified:'#ef4444', converted:'#8b5cf6' }
+  const dealStageColors = { prospecting:'#64748b', proposal:'#f59e0b', negotiation:'#f97316', won:'#10b981', lost:'#ef4444' }
+
+  const panels = [
+    { id:'leads',    label:'👥 Leads & Pipeline' },
+    { id:'deals',    label:'💼 Deals' },
+    { id:'quotes',   label:'📄 Quotes' },
+    { id:'new-lead', label:'➕ Add Lead' },
+    { id:'new-deal', label:'➕ Add Deal' },
+  ]
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <h2 style={{ color:'#3b82f6', marginBottom:8 }}>💼 CRM & Sales</h2>
+      {stats && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:12, marginBottom:20 }}>
+          {[
+            { label:'Total Leads',    val: stats.total_leads,    color:'#3b82f6' },
+            { label:'New Leads',      val: stats.new_leads,      color:'#f59e0b' },
+            { label:'Qualified',      val: stats.qualified_leads, color:'#10b981' },
+            { label:'Open Deals',     val: stats.open_deals,     color:'#f97316' },
+            { label:'Pipeline Value', val: '$' + stats.pipeline_value?.toLocaleString(), color:'#8b5cf6' },
+            { label:'Won Value',      val: '$' + stats.won_value?.toLocaleString(), color:'#10b981' },
+          ].map((s,i) => (
+            <div key={i} style={{ background:'#1e293b', borderRadius:8, padding:12, borderLeft:`3px solid ${s.color}` }}>
+              <div style={{ fontSize:'1.4rem', fontWeight:'bold', color:s.color }}>{s.val}</div>
+              <div style={{ fontSize:'.75rem', color:'#94a3b8' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {panels.map(p => (
+          <button key={p.id} className={`tab-btn ${panel===p.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }} onClick={() => setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:12, color:'#94a3b8' }}>{msg}</div>}
+
+      {panel === 'leads' && (
+        <div>
+          <h3 style={{ color:'#94a3b8', marginBottom:12 }}>Leads ({leads.length})</h3>
+          {loading ? <p style={{ color:'#64748b' }}>Loading...</p> : (
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr style={{ background:'#1e293b' }}>
+                  {['Name','Company','Email','Source','Status','AI Score','Actions'].map(h => (
+                    <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#94a3b8', fontSize:'.8rem' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map(l => (
+                  <tr key={l.id} style={{ borderBottom:'1px solid #1e293b' }}>
+                    <td style={{ padding:'8px 12px', color:'#f1f5f9' }}>{l.first_name} {l.last_name}</td>
+                    <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.85rem' }}>{l.company || '—'}</td>
+                    <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.8rem' }}>{l.email || '—'}</td>
+                    <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.8rem' }}>{l.source || '—'}</td>
+                    <td style={{ padding:'8px 12px' }}>
+                      <span style={{ background: statusColors[l.status] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:'.75rem' }}>
+                        {l.status}
+                      </span>
+                    </td>
+                    <td style={{ padding:'8px 12px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ width:40, height:6, background:'#1e293b', borderRadius:3 }}>
+                          <div style={{ width: `${l.score}%`, height:'100%', background:'#3b82f6', borderRadius:3 }} />
+                        </div>
+                        <span style={{ fontSize:'.75rem', color:'#94a3b8' }}>{l.score}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:'8px 12px' }}>
+                      <div style={{ display:'flex', gap:4 }}>
+                        {['contacted','qualified','converted'].map(s => (
+                          <button key={s} onClick={() => updateLeadStatus(l.id, s)}
+                            style={{ background:'#334155', border:'none', borderRadius:4, padding:'3px 7px', color:'#94a3b8', cursor:'pointer', fontSize:'.7rem' }}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {leads.length === 0 && <tr><td colSpan={7} style={{ padding:20, color:'#64748b', textAlign:'center' }}>No leads yet.</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {panel === 'deals' && (
+        <div>
+          <h3 style={{ color:'#94a3b8', marginBottom:12 }}>Deals ({deals.length})</h3>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:12 }}>
+            {deals.map(d => (
+              <div key={d.id} style={{ background:'#1e293b', borderRadius:10, padding:16, borderTop:`3px solid ${dealStageColors[d.stage] || '#64748b'}` }}>
+                <div style={{ fontWeight:'bold', color:'#f1f5f9', marginBottom:4 }}>{d.title}</div>
+                <div style={{ fontSize:'.8rem', color:'#94a3b8', marginBottom:8 }}>Stage: {d.stage}</div>
+                <div style={{ fontSize:'1.2rem', fontWeight:'bold', color:'#10b981' }}>${d.value?.toLocaleString() || 0}</div>
+                <div style={{ fontSize:'.75rem', color:'#64748b', marginTop:4 }}>Probability: {d.probability}% | {d.status}</div>
+                {d.expected_close && <div style={{ fontSize:'.75rem', color:'#94a3b8', marginTop:4 }}>Close: {d.expected_close}</div>}
+              </div>
+            ))}
+            {deals.length === 0 && <p style={{ color:'#64748b' }}>No deals yet.</p>}
+          </div>
+        </div>
+      )}
+
+      {panel === 'quotes' && (
+        <div>
+          <h3 style={{ color:'#94a3b8', marginBottom:12 }}>Quotes ({quotes.length})</h3>
+          <table style={{ width:'100%', borderCollapse:'collapse' }}>
+            <thead>
+              <tr style={{ background:'#1e293b' }}>
+                {['Quote #','Title','Client','Total','Status','Valid Until'].map(h => (
+                  <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#94a3b8', fontSize:'.8rem' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {quotes.map(q => (
+                <tr key={q.id} style={{ borderBottom:'1px solid #0f172a' }}>
+                  <td style={{ padding:'8px 12px', color:'#3b82f6', fontSize:'.85rem' }}>{q.quote_number}</td>
+                  <td style={{ padding:'8px 12px', color:'#f1f5f9' }}>{q.title}</td>
+                  <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.85rem' }}>{q.client_name || '—'}</td>
+                  <td style={{ padding:'8px 12px', color:'#10b981', fontWeight:'bold' }}>${q.total?.toFixed(2)}</td>
+                  <td style={{ padding:'8px 12px' }}><Badge value={q.status} /></td>
+                  <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.8rem' }}>{q.valid_until || '—'}</td>
+                </tr>
+              ))}
+              {quotes.length === 0 && <tr><td colSpan={6} style={{ padding:20, color:'#64748b', textAlign:'center' }}>No quotes yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {panel === 'new-lead' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Add New Lead</h3>
+          <form onSubmit={createLead} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { key:'first_name', label:'First Name *', type:'text', required:true },
+              { key:'last_name',  label:'Last Name',    type:'text' },
+              { key:'email',      label:'Email',        type:'email' },
+              { key:'phone',      label:'Phone',        type:'tel' },
+              { key:'company',    label:'Company',      type:'text' },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <input type={f.type} required={f.required}
+                  value={form[f.key] || ''}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+              </div>
+            ))}
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Source</label>
+              <select value={form.source || ''} onChange={e => setForm(p => ({ ...p, source: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                <option value=''>— Select —</option>
+                {['web','call','referral','social','campaign','email'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Notes</label>
+              <textarea value={form.notes || ''} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
+                rows={3} style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4, resize:'vertical' }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>🚀 Create Lead (AI will score)</button>
+          </form>
+        </div>
+      )}
+
+      {panel === 'new-deal' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Add New Deal</h3>
+          <form onSubmit={createDeal} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { key:'title',          label:'Deal Title *',     type:'text', required:true },
+              { key:'value',          label:'Deal Value ($)',   type:'number' },
+              { key:'probability',    label:'Probability (%)',  type:'number' },
+              { key:'expected_close', label:'Expected Close',   type:'date' },
+              { key:'assigned_to',    label:'Assigned To',      type:'text' },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <input type={f.type} required={f.required}
+                  value={dealForm[f.key] || ''}
+                  onChange={e => setDealForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+              </div>
+            ))}
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Stage</label>
+              <select value={dealForm.stage || 'prospecting'} onChange={e => setDealForm(p => ({ ...p, stage: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                {['prospecting','qualification','proposal','negotiation','won','lost'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <button type='submit' className='btn btn-primary'>💼 Create Deal</button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── Recruitment & Staffing Tab ─────────────────────────────────────────────────
+function RecruitmentTab() {
+  const { token } = useAuth()
+  const [panel, setPanel]         = useState('jobs')
+  const [jobs, setJobs]           = useState([])
+  const [candidates, setCandidates] = useState([])
+  const [applications, setApplications] = useState([])
+  const [stats, setStats]         = useState(null)
+  const [jobForm, setJobForm]     = useState({})
+  const [candForm, setCandForm]   = useState({})
+  const [msg, setMsg]             = useState('')
+  const [loading, setLoading]     = useState(false)
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [j, c, a, s] = await Promise.all([
+        apiFetch('/recruitment/jobs?limit=50', { headers: authH }),
+        apiFetch('/recruitment/candidates?limit=50', { headers: authH }),
+        apiFetch('/recruitment/applications?limit=50', { headers: authH }),
+        apiFetch('/recruitment/stats', { headers: authH }),
+      ])
+      setJobs(j); setCandidates(c); setApplications(a); setStats(s)
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  async function createJob(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/recruitment/jobs', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...jobForm }) })
+      setMsg('Job posted! AI writing optimized description...')
+      setJobForm({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function createCandidate(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/recruitment/candidates', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...candForm }) })
+      setMsg('Candidate added!')
+      setCandForm({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function updateAppStage(id, stage) {
+    try {
+      await apiFetch(`/recruitment/applications/${id}`, { method:'PUT', headers: authH, body: JSON.stringify({ stage }) })
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  const stageColors = { applied:'#64748b', screening:'#f59e0b', interview:'#3b82f6', offer:'#f97316', hired:'#10b981', rejected:'#ef4444' }
+  const panels = [
+    { id:'jobs',       label:'💼 Job Postings' },
+    { id:'candidates', label:'👤 Candidates' },
+    { id:'pipeline',   label:'📊 ATS Pipeline' },
+    { id:'post-job',   label:'➕ Post Job' },
+    { id:'add-cand',   label:'➕ Add Candidate' },
+  ]
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <h2 style={{ color:'#10b981', marginBottom:8 }}>👔 Recruitment & Staffing</h2>
+      {stats && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:12, marginBottom:20 }}>
+          {[
+            { label:'Active Jobs',   val: stats.active_jobs,      color:'#10b981' },
+            { label:'Candidates',    val: stats.total_candidates,  color:'#3b82f6' },
+            { label:'Applications',  val: stats.total_applications, color:'#f59e0b' },
+            { label:'Interviewing',  val: stats.in_interview,      color:'#f97316' },
+            { label:'Offers Sent',   val: stats.offers_sent,       color:'#8b5cf6' },
+            { label:'Hired',         val: stats.hired,             color:'#10b981' },
+          ].map((s,i) => (
+            <div key={i} style={{ background:'#1e293b', borderRadius:8, padding:12, borderLeft:`3px solid ${s.color}` }}>
+              <div style={{ fontSize:'1.4rem', fontWeight:'bold', color:s.color }}>{s.val}</div>
+              <div style={{ fontSize:'.75rem', color:'#94a3b8' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {panels.map(p => (
+          <button key={p.id} className={`tab-btn ${panel===p.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }} onClick={() => setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:12, color:'#94a3b8' }}>{msg}</div>}
+
+      {panel === 'jobs' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:16 }}>
+          {loading ? <p style={{ color:'#64748b' }}>Loading...</p> : jobs.map(j => (
+            <div key={j.id} style={{ background:'#1e293b', borderRadius:10, padding:16, borderTop:'3px solid #10b981' }}>
+              <div style={{ fontWeight:'bold', color:'#f1f5f9', marginBottom:4 }}>{j.title}</div>
+              <div style={{ fontSize:'.8rem', color:'#94a3b8', marginBottom:6 }}>{j.department} · {j.location || 'Remote'}</div>
+              <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8 }}>
+                <span style={{ background:'#0f172a', padding:'2px 7px', borderRadius:10, fontSize:'.7rem', color:'#94a3b8' }}>{j.job_type}</span>
+                <span style={{ background:'#0f172a', padding:'2px 7px', borderRadius:10, fontSize:'.7rem', color:'#94a3b8' }}>{j.remote_option}</span>
+                <Badge value={j.status} />
+              </div>
+              {j.salary_min && <div style={{ color:'#10b981', fontSize:'.85rem', fontWeight:'bold' }}>{j.salary_currency} {j.salary_min?.toLocaleString()} – {j.salary_max?.toLocaleString()}</div>}
+              {j.ai_description && (
+                <div style={{ marginTop:8, padding:8, background:'#0f172a', borderRadius:6, fontSize:'.75rem', color:'#94a3b8', maxHeight:80, overflow:'auto' }}>
+                  <span style={{ color:'#8b5cf6' }}>AI: </span>{j.ai_description.substring(0,200)}...
+                </div>
+              )}
+            </div>
+          ))}
+          {!loading && jobs.length === 0 && <p style={{ color:'#64748b' }}>No jobs posted yet.</p>}
+        </div>
+      )}
+
+      {panel === 'candidates' && (
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'#1e293b' }}>
+              {['Name','Email','Location','Experience','AI Score','Status'].map(h => (
+                <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#94a3b8', fontSize:'.8rem' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map(c => (
+              <tr key={c.id} style={{ borderBottom:'1px solid #0f172a' }}>
+                <td style={{ padding:'8px 12px', color:'#f1f5f9', fontWeight:'bold' }}>{c.first_name} {c.last_name}</td>
+                <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.85rem' }}>{c.email || '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.85rem' }}>{c.location || '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#f59e0b' }}>{c.experience_years ? `${c.experience_years} yrs` : '—'}</td>
+                <td style={{ padding:'8px 12px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                    <div style={{ width:40, height:6, background:'#0f172a', borderRadius:3 }}>
+                      <div style={{ width:`${c.ai_score || 0}%`, height:'100%', background:'#10b981', borderRadius:3 }} />
+                    </div>
+                    <span style={{ fontSize:'.75rem', color:'#94a3b8' }}>{c.ai_score?.toFixed(0) || 0}</span>
+                  </div>
+                </td>
+                <td style={{ padding:'8px 12px' }}><Badge value={c.status} /></td>
+              </tr>
+            ))}
+            {candidates.length === 0 && <tr><td colSpan={6} style={{ padding:20, color:'#64748b', textAlign:'center' }}>No candidates yet.</td></tr>}
+          </tbody>
+        </table>
+      )}
+
+      {panel === 'pipeline' && (
+        <div>
+          <h3 style={{ color:'#94a3b8', marginBottom:12 }}>ATS Pipeline ({applications.length} applications)</h3>
+          <div style={{ display:'flex', gap:12, overflowX:'auto', paddingBottom:16 }}>
+            {['applied','screening','interview','offer','hired','rejected'].map(stage => (
+              <div key={stage} style={{ minWidth:200, background:'#1e293b', borderRadius:8, padding:12, borderTop:`3px solid ${stageColors[stage]}` }}>
+                <div style={{ fontWeight:'bold', color:stageColors[stage], marginBottom:8, textTransform:'capitalize' }}>{stage} ({applications.filter(a=>a.stage===stage).length})</div>
+                {applications.filter(a=>a.stage===stage).map(a => (
+                  <div key={a.id} style={{ background:'#0f172a', borderRadius:6, padding:8, marginBottom:6 }}>
+                    <div style={{ fontSize:'.8rem', color:'#f1f5f9', fontWeight:'bold' }}>App #{a.id}</div>
+                    <div style={{ fontSize:'.7rem', color:'#94a3b8' }}>Job #{a.job_posting_id} · Cand #{a.candidate_id}</div>
+                    <div style={{ fontSize:'.7rem', color:'#10b981', marginTop:4 }}>Match: {a.ai_match_score?.toFixed(0)}%</div>
+                    <div style={{ display:'flex', gap:4, marginTop:6, flexWrap:'wrap' }}>
+                      {['screening','interview','offer','hired','rejected'].filter(s=>s!==stage).slice(0,2).map(s => (
+                        <button key={s} onClick={() => updateAppStage(a.id, s)}
+                          style={{ background:'#1e293b', border:'none', borderRadius:4, padding:'2px 6px', color:'#94a3b8', cursor:'pointer', fontSize:'.65rem' }}>
+                          → {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {applications.filter(a=>a.stage===stage).length === 0 && (
+                  <div style={{ fontSize:'.75rem', color:'#475569', textAlign:'center', padding:8 }}>Empty</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {panel === 'post-job' && (
+        <div style={{ maxWidth:600 }}>
+          <h3 style={{ color:'#94a3b4', marginBottom:16 }}>Post a Job Opening</h3>
+          <form onSubmit={createJob} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { key:'title',      label:'Job Title *',    type:'text',   required:true },
+              { key:'department', label:'Department',     type:'text' },
+              { key:'location',   label:'Location',       type:'text' },
+              { key:'salary_min', label:'Salary Min',     type:'number' },
+              { key:'salary_max', label:'Salary Max',     type:'number' },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <input type={f.type} required={f.required}
+                  value={jobForm[f.key] || ''}
+                  onChange={e => setJobForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+              </div>
+            ))}
+            {[
+              { key:'job_type', label:'Job Type', opts:['full_time','part_time','contract','temporary','internship'] },
+              { key:'remote_option', label:'Remote Option', opts:['on_site','remote','hybrid'] },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <select value={jobForm[f.key] || f.opts[0]} onChange={e => setJobForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                  {f.opts.map(o => <option key={o} value={o}>{o.replace(/_/g,' ')}</option>)}
+                </select>
+              </div>
+            ))}
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Requirements</label>
+              <textarea value={jobForm.requirements || ''} onChange={e => setJobForm(p => ({ ...p, requirements: e.target.value }))}
+                rows={3} placeholder="List key requirements..."
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4, resize:'vertical' }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>🚀 Post Job (AI will optimize description)</button>
+          </form>
+        </div>
+      )}
+
+      {panel === 'add-cand' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Add Candidate</h3>
+          <form onSubmit={createCandidate} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { key:'first_name',       label:'First Name *',     type:'text',   required:true },
+              { key:'last_name',        label:'Last Name *',      type:'text',   required:true },
+              { key:'email',            label:'Email',            type:'email' },
+              { key:'phone',            label:'Phone',            type:'tel' },
+              { key:'location',         label:'Location',         type:'text' },
+              { key:'experience_years', label:'Years Experience', type:'number' },
+              { key:'education',        label:'Education',        type:'text' },
+              { key:'linkedin_url',     label:'LinkedIn URL',     type:'url' },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <input type={f.type} required={f.required}
+                  value={candForm[f.key] || ''}
+                  onChange={e => setCandForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+              </div>
+            ))}
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Skills (comma-separated)</label>
+              <input type='text' value={candForm.skills || ''} onChange={e => setCandForm(p => ({ ...p, skills: e.target.value }))}
+                placeholder='React, Python, Sales, CRM...'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>➕ Add Candidate</button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── Marketing Suite Tab ────────────────────────────────────────────────────────
+function MarketingSuiteTab() {
+  const { token } = useAuth()
+  const [panel, setPanel]           = useState('campaigns')
+  const [campaigns, setCampaigns]   = useState([])
+  const [forms, setForms]           = useState([])
+  const [stats, setStats]           = useState(null)
+  const [campForm, setCampForm]     = useState({})
+  const [formData, setFormData]     = useState({})
+  const [msg, setMsg]               = useState('')
+  const [loading, setLoading]       = useState(false)
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [c, f, s] = await Promise.all([
+        apiFetch('/marketing/campaigns?limit=50', { headers: authH }),
+        apiFetch('/marketing/forms', { headers: authH }),
+        apiFetch('/marketing/stats', { headers: authH }),
+      ])
+      setCampaigns(c); setForms(f); setStats(s)
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  async function createCampaign(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/marketing/campaigns', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...campForm }) })
+      setMsg('Campaign created! AI generating content...')
+      setCampForm({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function launchCampaign(id) {
+    try {
+      await apiFetch(`/marketing/campaigns/${id}/launch`, { method:'POST', headers: authH })
+      setMsg('Campaign launched!')
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function createForm(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/marketing/forms', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...formData }) })
+      setMsg('Form created!')
+      setFormData({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  const statusColors = { draft:'#64748b', scheduled:'#f59e0b', active:'#10b981', paused:'#f97316', completed:'#3b82f6', cancelled:'#ef4444' }
+  const typeIcons = { email:'📧', sms:'📱', voice:'📞', social:'📣', multi_channel:'🌐' }
+
+  const panels = [
+    { id:'campaigns',    label:'📢 Campaigns' },
+    { id:'forms',        label:'📝 Forms' },
+    { id:'new-campaign', label:'➕ New Campaign' },
+    { id:'new-form',     label:'➕ New Form' },
+  ]
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <h2 style={{ color:'#f59e0b', marginBottom:8 }}>📢 Marketing Suite</h2>
+      {stats && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:12, marginBottom:20 }}>
+          {[
+            { label:'Total Campaigns', val: stats.total_campaigns,  color:'#f59e0b' },
+            { label:'Active',          val: stats.active_campaigns,  color:'#10b981' },
+            { label:'Total Sent',      val: stats.total_sent?.toLocaleString(), color:'#3b82f6' },
+            { label:'Total Opens',     val: stats.total_opens?.toLocaleString(), color:'#8b5cf6' },
+            { label:'Open Rate',       val: stats.open_rate_pct + '%', color:'#f97316' },
+            { label:'Form Submissions',val: stats.total_submissions, color:'#10b981' },
+          ].map((s,i) => (
+            <div key={i} style={{ background:'#1e293b', borderRadius:8, padding:12, borderLeft:`3px solid ${s.color}` }}>
+              <div style={{ fontSize:'1.4rem', fontWeight:'bold', color:s.color }}>{s.val}</div>
+              <div style={{ fontSize:'.75rem', color:'#94a3b8' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {panels.map(p => (
+          <button key={p.id} className={`tab-btn ${panel===p.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }} onClick={() => setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:12, color:'#94a3b8' }}>{msg}</div>}
+
+      {panel === 'campaigns' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))', gap:16 }}>
+          {loading ? <p style={{ color:'#64748b' }}>Loading...</p> : campaigns.map(c => (
+            <div key={c.id} style={{ background:'#1e293b', borderRadius:10, padding:16, borderLeft:`4px solid ${statusColors[c.status] || '#64748b'}` }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                <div>
+                  <div style={{ fontSize:'1rem', fontWeight:'bold', color:'#f1f5f9' }}>
+                    {typeIcons[c.campaign_type] || '📢'} {c.name}
+                  </div>
+                  {c.subject && <div style={{ fontSize:'.8rem', color:'#94a3b8', marginTop:2 }}>{c.subject}</div>}
+                </div>
+                <Badge value={c.status} />
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6, marginBottom:10 }}>
+                {[['Sent', c.sent_count], ['Opens', c.open_count], ['Clicks', c.click_count]].map(([l,v]) => (
+                  <div key={l} style={{ textAlign:'center', background:'#0f172a', borderRadius:6, padding:6 }}>
+                    <div style={{ fontWeight:'bold', color:'#f1f5f9' }}>{v}</div>
+                    <div style={{ fontSize:'.7rem', color:'#64748b' }}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              {c.ai_generated_body && (
+                <div style={{ background:'#0f172a', borderRadius:6, padding:8, fontSize:'.75rem', color:'#94a3b8', marginBottom:8, maxHeight:60, overflow:'hidden' }}>
+                  <span style={{ color:'#8b5cf6' }}>AI: </span>{c.ai_generated_body.substring(0,120)}...
+                </div>
+              )}
+              {c.status === 'draft' && (
+                <button onClick={() => launchCampaign(c.id)} className='btn btn-primary' style={{ width:'100%', fontSize:'.8rem', padding:'6px 12px' }}>
+                  🚀 Launch Campaign
+                </button>
+              )}
+            </div>
+          ))}
+          {!loading && campaigns.length === 0 && <p style={{ color:'#64748b' }}>No campaigns yet.</p>}
+        </div>
+      )}
+
+      {panel === 'forms' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:16 }}>
+          {forms.map(f => (
+            <div key={f.id} style={{ background:'#1e293b', borderRadius:10, padding:16 }}>
+              <div style={{ fontWeight:'bold', color:'#f1f5f9', marginBottom:4 }}>{f.name}</div>
+              <div style={{ fontSize:'.8rem', color:'#94a3b8', marginBottom:8 }}>{f.form_type}</div>
+              <div style={{ display:'flex', justifyContent:'space-between' }}>
+                <span style={{ fontSize:'.8rem', color:'#10b981' }}>📩 {f.submission_count} submissions</span>
+                <Badge value={f.is_active ? 'active' : 'inactive'} />
+              </div>
+            </div>
+          ))}
+          {forms.length === 0 && <p style={{ color:'#64748b' }}>No forms yet.</p>}
+        </div>
+      )}
+
+      {panel === 'new-campaign' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Create Campaign</h3>
+          <form onSubmit={createCampaign} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Campaign Name *</label>
+              <input type='text' required value={campForm.name || ''}
+                onChange={e => setCampForm(p => ({ ...p, name: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Type</label>
+              <select value={campForm.campaign_type || 'email'} onChange={e => setCampForm(p => ({ ...p, campaign_type: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                {['email','sms','voice','social','multi_channel'].map(t => <option key={t} value={t}>{t.replace(/_/g,' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Subject / Topic</label>
+              <input type='text' value={campForm.subject || ''}
+                onChange={e => setCampForm(p => ({ ...p, subject: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Target Segment</label>
+              <select value={campForm.target_segment || 'all'} onChange={e => setCampForm(p => ({ ...p, target_segment: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                {['all','leads','customers','inactive','vip'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Body (or leave blank for AI generation)</label>
+              <textarea value={campForm.body || ''} onChange={e => setCampForm(p => ({ ...p, body: e.target.value }))}
+                rows={4} placeholder='Leave blank for AI to generate...'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4, resize:'vertical' }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>📢 Create Campaign (AI will generate content)</button>
+          </form>
+        </div>
+      )}
+
+      {panel === 'new-form' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Create Lead Capture Form</h3>
+          <form onSubmit={createForm} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Form Name *</label>
+              <input type='text' required value={formData.name || ''}
+                onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Form Type</label>
+              <select value={formData.form_type || 'lead_capture'} onChange={e => setFormData(p => ({ ...p, form_type: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                {['lead_capture','survey','contact','appointment'].map(t => <option key={t} value={t}>{t.replace(/_/g,' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Thank You Message</label>
+              <textarea value={formData.thank_you_message || ''} onChange={e => setFormData(p => ({ ...p, thank_you_message: e.target.value }))}
+                rows={2} placeholder='Thank you for contacting us!'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4, resize:'vertical' }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>📝 Create Form</button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── SmartBoss AI Tab ───────────────────────────────────────────────────────────
+function SmartBossTab() {
+  const { token } = useAuth()
+  const [overview, setOverview]   = useState(null)
+  const [insights, setInsights]   = useState([])
+  const [question, setQuestion]   = useState('')
+  const [answer, setAnswer]       = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [genLoading, setGenLoading] = useState(false)
+  const [msg, setMsg]             = useState('')
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [ov, ins] = await Promise.all([
+        apiFetch('/smartboss/overview', { headers: authH }),
+        apiFetch('/smartboss/insights?limit=10', { headers: authH }),
+      ])
+      setOverview(ov); setInsights(ins)
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  async function askSmartBoss(e) {
+    e.preventDefault(); setAnswer(''); setMsg('')
+    setLoading(true)
+    try {
+      const res = await apiFetch('/smartboss/query', { method:'POST', headers: authH, body: JSON.stringify({ question }) })
+      setAnswer(res.answer)
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  async function generateInsights() {
+    setGenLoading(true); setMsg('')
+    try {
+      const res = await apiFetch('/smartboss/insights/generate', { method:'POST', headers: authH })
+      setMsg(`Generated ${res.insights_created} new insights!`)
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setGenLoading(false) }
+  }
+
+  async function markRead(id) {
+    try {
+      await apiFetch(`/smartboss/insights/${id}/read`, { method:'PUT', headers: authH })
+      loadData()
+    } catch(e) {}
+  }
+
+  const priorityColors = { high:'#ef4444', medium:'#f59e0b', low:'#10b981' }
+
+  const MODULE_ICONS = {
+    crm:'💼', recruitment:'👔', marketing:'📢', operations:'⚙️', revenue:'💰', calltrack:'📞', automation:'⚡'
+  }
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <h2 style={{ color:'#8b5cf6', margin:0 }}>🧠 SmartBoss AI — Executive Intelligence</h2>
+        <button onClick={generateInsights} disabled={genLoading} className='btn btn-primary' style={{ fontSize:'.85rem' }}>
+          {genLoading ? '⏳ Analyzing...' : '✨ Generate Insights'}
+        </button>
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:16, color:'#94a3b8' }}>{msg}</div>}
+
+      {/* Platform Overview Grid */}
+      {overview && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))', gap:16, marginBottom:24 }}>
+          {Object.entries(overview).filter(([k]) => !['module','generated_at'].includes(k)).map(([key, data]) => (
+            <div key={key} style={{ background:'#1e293b', borderRadius:10, padding:16 }}>
+              <h4 style={{ color:'#94a3b8', marginTop:0, marginBottom:10, display:'flex', alignItems:'center', gap:8 }}>
+                {MODULE_ICONS[key] || '📊'} {key.replace(/_/g,' ').toUpperCase()}
+              </h4>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+                {Object.entries(data).slice(0, 6).map(([k, v]) => (
+                  <div key={k} style={{ background:'#0f172a', borderRadius:6, padding:8 }}>
+                    <div style={{ fontSize:'1rem', fontWeight:'bold', color:'#f1f5f9' }}>{typeof v === 'number' ? v.toLocaleString() : v}</div>
+                    <div style={{ fontSize:'.65rem', color:'#64748b', marginTop:2 }}>{k.replace(/_/g,' ')}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Natural Language Q&A */}
+      <div style={{ background:'#1e293b', borderRadius:12, padding:20, marginBottom:24 }}>
+        <h3 style={{ color:'#8b5cf6', marginTop:0, marginBottom:12 }}>💬 Ask SmartBoss AI</h3>
+        <form onSubmit={askSmartBoss} style={{ display:'flex', gap:10 }}>
+          <input
+            type='text'
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            placeholder='Ask anything: "What are my top leads this week?" "How is recruitment performing?" ...'
+            style={{ flex:1, background:'#0f172a', border:'1px solid #334155', borderRadius:6, padding:'10px 14px', color:'#f1f5f9', fontSize:'.9rem' }}
+          />
+          <button type='submit' disabled={loading || !question} className='btn btn-primary'>
+            {loading ? '⏳' : '🔍 Ask'}
+          </button>
+        </form>
+        {answer && (
+          <div style={{ marginTop:16, padding:16, background:'#0f172a', borderRadius:8, color:'#e2e8f0', lineHeight:1.6, whiteSpace:'pre-wrap', fontSize:'.9rem' }}>
+            <span style={{ color:'#8b5cf6', fontWeight:'bold' }}>SmartBoss: </span>{answer}
+          </div>
+        )}
+      </div>
+
+      {/* Insights Feed */}
+      <div>
+        <h3 style={{ color:'#94a3b8', marginBottom:12 }}>🔔 AI Insights ({insights.length})</h3>
+        {insights.length === 0 ? (
+          <div style={{ background:'#1e293b', borderRadius:8, padding:20, textAlign:'center', color:'#64748b' }}>
+            No insights yet. Click "Generate Insights" to analyze your platform data.
+          </div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {insights.map(ins => (
+              <div key={ins.id} style={{
+                background:'#1e293b', borderRadius:8, padding:16,
+                borderLeft:`4px solid ${priorityColors[ins.priority] || '#64748b'}`,
+                opacity: ins.is_read ? 0.6 : 1
+              }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
+                  <div style={{ fontWeight:'bold', color:'#f1f5f9' }}>{ins.title}</div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <span style={{ background: priorityColors[ins.priority], color:'#fff', padding:'2px 8px', borderRadius:10, fontSize:'.7rem' }}>{ins.priority}</span>
+                    {!ins.is_read && (
+                      <button onClick={() => markRead(ins.id)} style={{ background:'#334155', border:'none', borderRadius:4, padding:'2px 8px', color:'#94a3b8', cursor:'pointer', fontSize:'.7rem' }}>
+                        Mark Read
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {ins.summary && <p style={{ margin:'0 0 6px', color:'#94a3b8', fontSize:'.85rem' }}>{ins.summary}</p>}
+                {ins.recommendation && (
+                  <div style={{ background:'#0f172a', borderRadius:6, padding:8, fontSize:'.8rem', color:'#10b981' }}>
+                    💡 {ins.recommendation}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+// ── Automation & Workflow Tab ───────────────────────────────────────────────────
+function AutomationTab() {
+  const { token } = useAuth()
+  const [panel, setPanel]           = useState('workflows')
+  const [workflows, setWorkflows]   = useState([])
+  const [executions, setExecutions] = useState([])
+  const [webhooks, setWebhooks]     = useState([])
+  const [wfForm, setWfForm]         = useState({})
+  const [whForm, setWhForm]         = useState({})
+  const [msg, setMsg]               = useState('')
+  const [loading, setLoading]       = useState(false)
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [wf, ex, wh] = await Promise.all([
+        apiFetch('/automation/workflows', { headers: authH }),
+        apiFetch('/automation/executions?limit=20', { headers: authH }),
+        apiFetch('/automation/webhooks', { headers: authH }),
+      ])
+      setWorkflows(wf); setExecutions(ex); setWebhooks(wh)
+    } catch(e) { setMsg('Error: ' + e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  async function createWorkflow(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/automation/workflows', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...wfForm }) })
+      setMsg('Workflow created!')
+      setWfForm({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function toggleWorkflow(id, current) {
+    try {
+      await apiFetch(`/automation/workflows/${id}`, { method:'PUT', headers: authH, body: JSON.stringify({ is_active: !current }) })
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function runWorkflow(id) {
+    try {
+      const res = await apiFetch(`/automation/workflows/${id}/run`, { method:'POST', headers: authH })
+      setMsg(`Workflow run complete: ${res.steps_run} steps executed.`)
+      loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  async function createWebhook(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/automation/webhooks', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...whForm }) })
+      setMsg('Webhook configured!')
+      setWhForm({}); loadData()
+    } catch(e) { setMsg('Error: ' + e.message) }
+  }
+
+  const triggerIcons = { new_lead:'👥', appointment:'📅', form_submit:'📝', schedule:'⏰', webhook:'🔗', manual:'▶️' }
+  const statusColors = { running:'#f59e0b', completed:'#10b981', failed:'#ef4444', cancelled:'#64748b' }
+
+  const panels = [
+    { id:'workflows',  label:'⚡ Workflows' },
+    { id:'executions', label:'📋 Run History' },
+    { id:'webhooks',   label:'🔗 Webhooks' },
+    { id:'new-wf',     label:'➕ New Workflow' },
+    { id:'new-wh',     label:'➕ New Webhook' },
+  ]
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <h2 style={{ color:'#f97316', marginBottom:8 }}>⚡ Automation & Workflow Engine</h2>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:20, maxWidth:500 }}>
+        {[
+          { label:'Total Workflows', val: workflows.length,                                    color:'#f97316' },
+          { label:'Active',          val: workflows.filter(w=>w.is_active).length,             color:'#10b981' },
+          { label:'Total Runs',      val: workflows.reduce((a,w)=>a+(w.run_count||0),0),       color:'#3b82f6' },
+        ].map((s,i) => (
+          <div key={i} style={{ background:'#1e293b', borderRadius:8, padding:12, borderLeft:`3px solid ${s.color}` }}>
+            <div style={{ fontSize:'1.4rem', fontWeight:'bold', color:s.color }}>{s.val}</div>
+            <div style={{ fontSize:'.75rem', color:'#94a3b8' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {panels.map(p => (
+          <button key={p.id} className={`tab-btn ${panel===p.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }} onClick={() => setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:12, color:'#94a3b8' }}>{msg}</div>}
+
+      {panel === 'workflows' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:16 }}>
+          {loading ? <p style={{ color:'#64748b' }}>Loading...</p> : workflows.map(wf => (
+            <div key={wf.id} style={{ background:'#1e293b', borderRadius:10, padding:16, border:`1px solid ${wf.is_active ? '#f97316' : '#334155'}` }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                <div>
+                  <div style={{ fontWeight:'bold', color:'#f1f5f9' }}>{wf.name}</div>
+                  <div style={{ fontSize:'.75rem', color:'#94a3b8', marginTop:2 }}>{wf.description || 'No description'}</div>
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:'.7rem', color: wf.is_active ? '#10b981' : '#64748b', fontWeight:'bold' }}>
+                    {wf.is_active ? '● ACTIVE' : '○ INACTIVE'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                <span style={{ background:'#0f172a', padding:'3px 8px', borderRadius:10, fontSize:'.7rem', color:'#94a3b8' }}>
+                  {triggerIcons[wf.trigger_type] || '⚡'} {wf.trigger_type}
+                </span>
+                <span style={{ background:'#0f172a', padding:'3px 8px', borderRadius:10, fontSize:'.7rem', color:'#64748b' }}>
+                  {wf.run_count || 0} runs
+                </span>
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={() => toggleWorkflow(wf.id, wf.is_active)}
+                  style={{ flex:1, background: wf.is_active ? '#374151' : '#10b981', border:'none', borderRadius:6, padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:'.8rem' }}>
+                  {wf.is_active ? '⏸ Pause' : '▶ Activate'}
+                </button>
+                {wf.is_active && (
+                  <button onClick={() => runWorkflow(wf.id)}
+                    style={{ flex:1, background:'#f97316', border:'none', borderRadius:6, padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:'.8rem' }}>
+                    ▶ Run Now
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {!loading && workflows.length === 0 && (
+            <div style={{ background:'#1e293b', borderRadius:10, padding:24, textAlign:'center', color:'#64748b' }}>
+              No workflows yet. Create one to automate your business processes.
+            </div>
+          )}
+        </div>
+      )}
+
+      {panel === 'executions' && (
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'#1e293b' }}>
+              {['ID','Workflow','Status','Steps','Started','Completed'].map(h => (
+                <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#94a3b8', fontSize:'.8rem' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {executions.map(ex => (
+              <tr key={ex.id} style={{ borderBottom:'1px solid #0f172a' }}>
+                <td style={{ padding:'8px 12px', color:'#64748b', fontSize:'.8rem' }}>#{ex.id}</td>
+                <td style={{ padding:'8px 12px', color:'#f1f5f9', fontSize:'.85rem' }}>WF-{ex.workflow_id}</td>
+                <td style={{ padding:'8px 12px' }}>
+                  <span style={{ background: statusColors[ex.status] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:10, fontSize:'.75rem' }}>{ex.status}</span>
+                </td>
+                <td style={{ padding:'8px 12px', color:'#94a3b8' }}>{ex.steps_completed}</td>
+                <td style={{ padding:'8px 12px', color:'#64748b', fontSize:'.75rem' }}>{new Date(ex.started_at).toLocaleString()}</td>
+                <td style={{ padding:'8px 12px', color:'#64748b', fontSize:'.75rem' }}>{ex.completed_at ? new Date(ex.completed_at).toLocaleString() : '—'}</td>
+              </tr>
+            ))}
+            {executions.length === 0 && <tr><td colSpan={6} style={{ padding:20, color:'#64748b', textAlign:'center' }}>No executions yet.</td></tr>}
+          </tbody>
+        </table>
+      )}
+
+      {panel === 'webhooks' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:16 }}>
+          {webhooks.map(wh => (
+            <div key={wh.id} style={{ background:'#1e293b', borderRadius:10, padding:16, borderLeft:'4px solid #6366f1' }}>
+              <div style={{ fontWeight:'bold', color:'#f1f5f9', marginBottom:4 }}>{wh.name}</div>
+              <div style={{ fontSize:'.75rem', color:'#6366f1', wordBreak:'break-all', marginBottom:6 }}>{wh.url}</div>
+              {wh.events && <div style={{ fontSize:'.7rem', color:'#94a3b8' }}>Events: {wh.events}</div>}
+              <div style={{ fontSize:'.7rem', color:'#64748b', marginTop:4 }}>Fails: {wh.fail_count}</div>
+            </div>
+          ))}
+          {webhooks.length === 0 && <p style={{ color:'#64748b' }}>No webhooks configured yet.</p>}
+        </div>
+      )}
+
+      {panel === 'new-wf' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Create Workflow</h3>
+          <form onSubmit={createWorkflow} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Workflow Name *</label>
+              <input type='text' required value={wfForm.name || ''}
+                onChange={e => setWfForm(p => ({ ...p, name: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Description</label>
+              <input type='text' value={wfForm.description || ''}
+                onChange={e => setWfForm(p => ({ ...p, description: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Trigger</label>
+              <select value={wfForm.trigger_type || 'new_lead'} onChange={e => setWfForm(p => ({ ...p, trigger_type: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }}>
+                {['new_lead','appointment','form_submit','schedule','webhook','manual'].map(t => (
+                  <option key={t} value={t}>{triggerIcons[t] || '⚡'} {t.replace(/_/g,' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Steps (JSON array of step objects)</label>
+              <textarea value={wfForm.steps || ''} onChange={e => setWfForm(p => ({ ...p, steps: e.target.value }))}
+                rows={4} placeholder='[{"action":"send_email","to":"{{lead.email}}"},{"action":"create_task","title":"Follow up"}]'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4, resize:'vertical', fontFamily:'monospace', fontSize:'.8rem' }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>⚡ Create Workflow</button>
+          </form>
+        </div>
+      )}
+
+      {panel === 'new-wh' && (
+        <div style={{ maxWidth:500 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Configure Webhook</h3>
+          <form onSubmit={createWebhook} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Name *</label>
+              <input type='text' required value={whForm.name || ''}
+                onChange={e => setWhForm(p => ({ ...p, name: e.target.value }))}
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Webhook URL *</label>
+              <input type='url' required value={whForm.url || ''}
+                onChange={e => setWhForm(p => ({ ...p, url: e.target.value }))}
+                placeholder='https://your-service.com/webhook'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <div>
+              <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>Events (comma-separated)</label>
+              <input type='text' value={whForm.events || ''}
+                onChange={e => setWhForm(p => ({ ...p, events: e.target.value }))}
+                placeholder='new_lead,appointment,form_submit'
+                style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+            </div>
+            <button type='submit' className='btn btn-primary'>🔗 Add Webhook</button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── CallTrack AI Tab ───────────────────────────────────────────────────────────
+function CallTrackTab() {
+  const { token }  = useAuth()
+  const [numbers, setNumbers]   = useState([])
+  const [events, setEvents]     = useState([])
+  const [analytics, setAnalytics] = useState(null)
+  const [form, setForm]         = useState({})
+  const [panel, setPanel]       = useState('analytics')
+  const [msg, setMsg]           = useState('')
+
+  const authH = token ? { Authorization: `Bearer ${token}` } : {}
+
+  async function loadData() {
+    try {
+      const [n, e, a] = await Promise.all([
+        apiFetch('/calltrack/numbers', { headers: authH }),
+        apiFetch('/calltrack/events?limit=20', { headers: authH }),
+        apiFetch('/calltrack/analytics', { headers: authH }),
+      ])
+      setNumbers(n); setEvents(e); setAnalytics(a)
+    } catch(ex) { setMsg('Error: ' + ex.message) }
+  }
+
+  useEffect(() => { loadData() }, [])
+
+  async function addNumber(e) {
+    e.preventDefault(); setMsg('')
+    try {
+      await apiFetch('/calltrack/numbers', { method:'POST', headers: authH, body: JSON.stringify({ business_id:1, ...form }) })
+      setMsg('Tracking number added!')
+      setForm({}); loadData()
+    } catch(ex) { setMsg('Error: ' + ex.message) }
+  }
+
+  const panels = [
+    { id:'analytics', label:'📊 Analytics' },
+    { id:'numbers',   label:'📱 Tracking Numbers' },
+    { id:'events',    label:'📋 Call Events' },
+    { id:'add',       label:'➕ Add Number' },
+  ]
+
+  return (
+    <div style={{ padding:'24px', maxWidth:1200, margin:'0 auto' }}>
+      <h2 style={{ color:'#06b6d4', marginBottom:8 }}>📊 CallTrack AI</h2>
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        {panels.map(p => (
+          <button key={p.id} className={`tab-btn ${panel===p.id?'active':''}`}
+            style={{ fontSize:'.8rem', padding:'6px 12px' }} onClick={() => setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div style={{ background:'#1e293b', padding:10, borderRadius:6, marginBottom:12, color:'#94a3b8' }}>{msg}</div>}
+
+      {panel === 'analytics' && analytics && (
+        <div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12, marginBottom:20 }}>
+            {[
+              { label:'Tracking Numbers',    val: analytics.total_tracking_numbers, color:'#06b6d4' },
+              { label:'Total Calls',         val: analytics.total_calls,            color:'#3b82f6' },
+              { label:'Conversions',         val: analytics.total_conversions,      color:'#10b981' },
+              { label:'Conversion Rate',     val: analytics.conversion_rate_pct + '%', color:'#f59e0b' },
+              { label:'Avg Duration (s)',    val: analytics.avg_call_duration_secs, color:'#f97316' },
+              { label:'Revenue Attributed',  val: '$' + analytics.total_revenue_attributed?.toLocaleString(), color:'#10b981' },
+            ].map((s,i) => (
+              <div key={i} style={{ background:'#1e293b', borderRadius:8, padding:12, borderLeft:`3px solid ${s.color}` }}>
+                <div style={{ fontSize:'1.4rem', fontWeight:'bold', color:s.color }}>{s.val}</div>
+                <div style={{ fontSize:'.75rem', color:'#94a3b8' }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ background:'#1e293b', borderRadius:10, padding:20, color:'#94a3b8', textAlign:'center' }}>
+            <div style={{ fontSize:'2rem', marginBottom:8 }}>📞</div>
+            <div>Call attribution analytics. Add tracking numbers to campaigns and monitor which sources drive conversions.</div>
+          </div>
+        </div>
+      )}
+
+      {panel === 'numbers' && (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:16 }}>
+          {numbers.map(n => (
+            <div key={n.id} style={{ background:'#1e293b', borderRadius:10, padding:16, borderLeft:'4px solid #06b6d4' }}>
+              <div style={{ fontSize:'1.1rem', fontWeight:'bold', color:'#06b6d4' }}>{n.campaign_name}</div>
+              <div style={{ fontSize:'.9rem', color:'#f1f5f9', marginTop:4 }}>Source: {n.source || '—'}</div>
+              {n.medium && <div style={{ fontSize:'.8rem', color:'#94a3b8' }}>Medium: {n.medium}</div>}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:10 }}>
+                <div style={{ background:'#0f172a', borderRadius:6, padding:8, textAlign:'center' }}>
+                  <div style={{ fontWeight:'bold', color:'#f1f5f9' }}>{n.total_calls}</div>
+                  <div style={{ fontSize:'.7rem', color:'#64748b' }}>Total Calls</div>
+                </div>
+                <div style={{ background:'#0f172a', borderRadius:6, padding:8, textAlign:'center' }}>
+                  <div style={{ fontWeight:'bold', color:'#10b981' }}>{n.conversions}</div>
+                  <div style={{ fontSize:'.7rem', color:'#64748b' }}>Conversions</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {numbers.length === 0 && <p style={{ color:'#64748b' }}>No tracking numbers yet.</p>}
+        </div>
+      )}
+
+      {panel === 'events' && (
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'#1e293b' }}>
+              {['Caller','Duration','Conversion','Sentiment','AI Summary','Date'].map(h => (
+                <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:'#94a3b8', fontSize:'.8rem' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {events.map(ev => (
+              <tr key={ev.id} style={{ borderBottom:'1px solid #0f172a' }}>
+                <td style={{ padding:'8px 12px', color:'#f1f5f9', fontSize:'.85rem' }}>{ev.caller_phone || '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#94a3b8' }}>{ev.call_duration_secs}s</td>
+                <td style={{ padding:'8px 12px', color: ev.is_conversion ? '#10b981' : '#64748b' }}>{ev.is_conversion ? '✅ Yes' : '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#f59e0b', fontSize:'.8rem' }}>{ev.sentiment || '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#94a3b8', fontSize:'.75rem', maxWidth:200 }}>{ev.ai_summary?.substring(0,80) || '—'}</td>
+                <td style={{ padding:'8px 12px', color:'#64748b', fontSize:'.75rem' }}>{new Date(ev.created_at).toLocaleDateString()}</td>
+              </tr>
+            ))}
+            {events.length === 0 && <tr><td colSpan={6} style={{ padding:20, color:'#64748b', textAlign:'center' }}>No call events yet.</td></tr>}
+          </tbody>
+        </table>
+      )}
+
+      {panel === 'add' && (
+        <div style={{ maxWidth:400 }}>
+          <h3 style={{ color:'#94a3b8', marginBottom:16 }}>Add Tracking Number</h3>
+          <form onSubmit={addNumber} style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {[
+              { key:'campaign_name', label:'Campaign Name *', required:true },
+              { key:'source',        label:'Source (google, facebook, email...)' },
+              { key:'medium',        label:'Medium (cpc, organic, email...)' },
+              { key:'utm_campaign',  label:'UTM Campaign' },
+            ].map(f => (
+              <div key={f.key}>
+                <label style={{ color:'#94a3b8', fontSize:'.85rem' }}>{f.label}</label>
+                <input type='text' required={f.required} value={form[f.key] || ''}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                  style={{ width:'100%', background:'#1e293b', border:'1px solid #334155', borderRadius:6, padding:'8px 12px', color:'#f1f5f9', marginTop:4 }} />
+              </div>
+            ))}
+            <button type='submit' className='btn btn-primary'>📊 Add Tracking Number</button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 // ── App (inner, wrapped by LangProvider + AuthProvider) ──────────────────────
 function AppInner() {
   const { t }               = useLang()
@@ -3382,8 +4704,14 @@ function AppInner() {
 
   const TABS = [
     { id: 'home',          label: t.tabs.home },
+    { id: 'smartboss',     label: '🧠 SmartBoss AI' },
     { id: 'dashboard',     label: t.tabs.dashboard },
+    { id: 'crm',           label: '💼 CRM & Sales' },
+    { id: 'recruitment',   label: '👔 Recruitment' },
+    { id: 'marketing',     label: '📢 Marketing' },
     { id: 'call-center',   label: t.tabs.callCenter },
+    { id: 'calltrack',     label: '📊 CallTrack AI' },
+    { id: 'automation',    label: '⚡ Automation' },
     { id: 'businesses',    label: t.tabs.businesses },
     { id: 'appointments',  label: t.tabs.appointments },
     { id: 'approval',      label: '📋 Approvals' },
@@ -3391,12 +4719,12 @@ function AppInner() {
     { id: 'healthcare',    label: '🏥 Healthcare' },
     { id: 'marketplace',   label: '🏪 DME Market' },
     { id: 'agents',        label: '🤖 Agents' },
-    { id: 'commander',     label: '🧠 Commander AI' },
+    { id: 'commander',     label: '🤖 Commander AI' },
     { id: 'ai',            label: t.tabs.ai },
     { id: 'subscriptions', label: '💎 Pricing' },
   ]
 
-  const COMING_SOON_IDS = ['website-builder', 'marketing', 'content-studio', 'automation']
+  const COMING_SOON_IDS = ['website-builder', 'content-studio']
 
   return (
     <div className="app">
@@ -3462,8 +4790,14 @@ function AppInner() {
         </div>
 
         {activeTab === 'home'          && <HomeTab onNavigate={setActiveTab} />}
+        {activeTab === 'smartboss'     && <SmartBossTab />}
         {activeTab === 'dashboard'     && <DashboardTab wsConnected={wsConnected} />}
+        {activeTab === 'crm'           && <CRMTab />}
+        {activeTab === 'recruitment'   && <RecruitmentTab />}
+        {activeTab === 'marketing'     && <MarketingSuiteTab />}
         {activeTab === 'call-center'   && <CallCenterTab />}
+        {activeTab === 'calltrack'     && <CallTrackTab />}
+        {activeTab === 'automation'    && <AutomationTab />}
         {activeTab === 'businesses'    && <BusinessesTab />}
         {activeTab === 'appointments'  && <AppointmentsTab />}
         {activeTab === 'approval'      && <ApprovalQueueTab />}

@@ -1325,3 +1325,882 @@ def data_entry_stats(db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CRM & SALES MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/crm/leads", response_model=schemas.LeadOut, status_code=201, tags=["crm"])
+async def create_lead(payload: schemas.LeadCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    lead = models.Lead(**payload.model_dump())
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    # AI lead scoring
+    try:
+        result = await AGENT_REGISTRY["sales"].run("score_lead", {
+            "company": lead.company, "source": lead.source, "notes": lead.notes
+        }, db)
+        score_text = result.get("result", {}).get("score", "")
+        import re
+        nums = re.findall(r'\b(\d{1,3})\b', str(score_text))
+        if nums:
+            lead.score = min(100, int(nums[0]))
+        lead.ai_notes = str(result.get("result", {}).get("notes", ""))
+        db.commit()
+        db.refresh(lead)
+    except Exception:
+        pass
+    return lead
+
+
+@app.get("/crm/leads", response_model=List[schemas.LeadOut], tags=["crm"])
+def list_leads(business_id: Optional[int] = None, status: Optional[str] = None,
+               skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.Lead)
+    if business_id:
+        q = q.filter(models.Lead.business_id == business_id)
+    if status:
+        q = q.filter(models.Lead.status == status)
+    return q.order_by(models.Lead.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/crm/leads/{lead_id}", response_model=schemas.LeadOut, tags=["crm"])
+def get_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.get(models.Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    return lead
+
+
+@app.put("/crm/leads/{lead_id}", response_model=schemas.LeadOut, tags=["crm"])
+def update_lead(lead_id: int, payload: schemas.LeadUpdate, db: Session = Depends(get_db)):
+    lead = db.get(models.Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(lead, k, v)
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(lead)
+    return lead
+
+
+@app.delete("/crm/leads/{lead_id}", tags=["crm"])
+def delete_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.get(models.Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    db.delete(lead)
+    db.commit()
+    return {"detail": f"Lead {lead_id} deleted."}
+
+
+@app.post("/crm/pipelines", response_model=schemas.PipelineOut, status_code=201, tags=["crm"])
+def create_pipeline(payload: schemas.PipelineCreate, db: Session = Depends(get_db)):
+    pipeline = models.Pipeline(**payload.model_dump())
+    db.add(pipeline)
+    db.commit()
+    db.refresh(pipeline)
+    return pipeline
+
+
+@app.get("/crm/pipelines", response_model=List[schemas.PipelineOut], tags=["crm"])
+def list_pipelines(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.Pipeline)
+    if business_id:
+        q = q.filter(models.Pipeline.business_id == business_id)
+    return q.all()
+
+
+@app.post("/crm/deals", response_model=schemas.DealOut, status_code=201, tags=["crm"])
+def create_deal(payload: schemas.DealCreate, db: Session = Depends(get_db)):
+    deal = models.Deal(**payload.model_dump())
+    db.add(deal)
+    db.commit()
+    db.refresh(deal)
+    return deal
+
+
+@app.get("/crm/deals", response_model=List[schemas.DealOut], tags=["crm"])
+def list_deals(business_id: Optional[int] = None, status: Optional[str] = None,
+               skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.Deal)
+    if business_id:
+        q = q.filter(models.Deal.business_id == business_id)
+    if status:
+        q = q.filter(models.Deal.status == status)
+    return q.order_by(models.Deal.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/crm/deals/{deal_id}", response_model=schemas.DealOut, tags=["crm"])
+def update_deal(deal_id: int, payload: schemas.DealUpdate, db: Session = Depends(get_db)):
+    deal = db.get(models.Deal, deal_id)
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(deal, k, v)
+    deal.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(deal)
+    return deal
+
+
+@app.post("/crm/quotes", response_model=schemas.QuoteOut, status_code=201, tags=["crm"])
+def create_quote(payload: schemas.QuoteCreate, db: Session = Depends(get_db)):
+    import random
+    quote = models.Quote(**payload.model_dump())
+    quote.quote_number = f"QT-{datetime.utcnow().strftime('%Y%m')}-{random.randint(1000,9999)}"
+    db.add(quote)
+    db.commit()
+    db.refresh(quote)
+    return quote
+
+
+@app.get("/crm/quotes", response_model=List[schemas.QuoteOut], tags=["crm"])
+def list_quotes(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.Quote)
+    if business_id:
+        q = q.filter(models.Quote.business_id == business_id)
+    return q.order_by(models.Quote.created_at.desc()).limit(100).all()
+
+
+@app.get("/crm/stats", tags=["crm"])
+def crm_stats(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q_leads = db.query(models.Lead)
+    q_deals = db.query(models.Deal)
+    q_quotes = db.query(models.Quote)
+    if business_id:
+        q_leads  = q_leads.filter(models.Lead.business_id == business_id)
+        q_deals  = q_deals.filter(models.Deal.business_id == business_id)
+        q_quotes = q_quotes.filter(models.Quote.business_id == business_id)
+
+    from sqlalchemy import func as sqlfunc
+    total_pipeline_value = db.query(sqlfunc.sum(models.Deal.value)).filter(
+        models.Deal.status == "open").scalar() or 0.0
+    won_value = db.query(sqlfunc.sum(models.Deal.value)).filter(
+        models.Deal.status == "won").scalar() or 0.0
+
+    return {
+        "total_leads":      q_leads.count(),
+        "new_leads":        q_leads.filter(models.Lead.status == "new").count(),
+        "qualified_leads":  q_leads.filter(models.Lead.status == "qualified").count(),
+        "converted_leads":  q_leads.filter(models.Lead.status == "converted").count(),
+        "total_deals":      q_deals.count(),
+        "open_deals":       q_deals.filter(models.Deal.status == "open").count(),
+        "won_deals":        q_deals.filter(models.Deal.status == "won").count(),
+        "pipeline_value":   round(float(total_pipeline_value), 2),
+        "won_value":        round(float(won_value), 2),
+        "total_quotes":     q_quotes.count(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECRUITMENT & STAFFING MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/recruitment/jobs", response_model=schemas.JobPostingOut, status_code=201, tags=["recruitment"])
+async def create_job_posting(payload: schemas.JobPostingCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    job = models.JobPosting(**payload.model_dump())
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    # AI-generate optimized job description
+    try:
+        result = await AGENT_REGISTRY["recruitment"].run("generate_job_description", {
+            "title": job.title,
+            "department": job.department or "",
+            "requirements": job.requirements or "",
+            "salary": f"{job.salary_currency} {job.salary_min}-{job.salary_max}" if job.salary_min else "Competitive",
+        }, db)
+        job.ai_description = result.get("result", {}).get("job_description", "")
+        db.commit()
+        db.refresh(job)
+    except Exception:
+        pass
+    return job
+
+
+@app.get("/recruitment/jobs", response_model=List[schemas.JobPostingOut], tags=["recruitment"])
+def list_job_postings(business_id: Optional[int] = None, status: Optional[str] = None,
+                      skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    q = db.query(models.JobPosting)
+    if business_id:
+        q = q.filter(models.JobPosting.business_id == business_id)
+    if status:
+        q = q.filter(models.JobPosting.status == status)
+    return q.order_by(models.JobPosting.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/recruitment/jobs/{job_id}", response_model=schemas.JobPostingOut, tags=["recruitment"])
+def get_job_posting(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(models.JobPosting, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found.")
+    return job
+
+
+@app.put("/recruitment/jobs/{job_id}", response_model=schemas.JobPostingOut, tags=["recruitment"])
+def update_job_posting(job_id: int, payload: schemas.JobPostingUpdate, db: Session = Depends(get_db)):
+    job = db.get(models.JobPosting, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(job, k, v)
+    job.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@app.post("/recruitment/candidates", response_model=schemas.CandidateOut, status_code=201, tags=["recruitment"])
+def create_candidate(payload: schemas.CandidateCreate, db: Session = Depends(get_db)):
+    candidate = models.Candidate(**payload.model_dump())
+    db.add(candidate)
+    db.commit()
+    db.refresh(candidate)
+    return candidate
+
+
+@app.get("/recruitment/candidates", response_model=List[schemas.CandidateOut], tags=["recruitment"])
+def list_candidates(business_id: Optional[int] = None, status: Optional[str] = None,
+                    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.Candidate)
+    if business_id:
+        q = q.filter(models.Candidate.business_id == business_id)
+    if status:
+        q = q.filter(models.Candidate.status == status)
+    return q.order_by(models.Candidate.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.post("/recruitment/applications", response_model=schemas.JobApplicationOut, status_code=201, tags=["recruitment"])
+async def create_application(payload: schemas.JobApplicationCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    job = db.get(models.JobPosting, payload.job_posting_id)
+    candidate = db.get(models.Candidate, payload.candidate_id)
+    if not job or not candidate:
+        raise HTTPException(status_code=404, detail="Job or candidate not found.")
+    app_obj = models.JobApplication(**payload.model_dump())
+    db.add(app_obj)
+    db.commit()
+    db.refresh(app_obj)
+    # AI match scoring
+    try:
+        result = await AGENT_REGISTRY["recruitment"].run("screen_resume", {
+            "job_title": job.title,
+            "requirements": job.requirements or "",
+            "resume_text": candidate.resume_text or f"Skills: {candidate.skills or ''}, Experience: {candidate.experience_years or 0} years",
+        }, db)
+        screening = result.get("result", {}).get("screening", "")
+        import re
+        scores = re.findall(r'(\d{1,3})/100|\bscore[:\s]+(\d{1,3})\b', screening, re.IGNORECASE)
+        if scores:
+            s = next((x for x in scores[0] if x), None)
+            if s:
+                app_obj.ai_match_score = min(100.0, float(s))
+        app_obj.ai_feedback = screening
+        db.commit()
+        db.refresh(app_obj)
+    except Exception:
+        pass
+    return app_obj
+
+
+@app.get("/recruitment/applications", response_model=List[schemas.JobApplicationOut], tags=["recruitment"])
+def list_applications(business_id: Optional[int] = None, job_posting_id: Optional[int] = None,
+                      skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.JobApplication)
+    if business_id:
+        q = q.filter(models.JobApplication.business_id == business_id)
+    if job_posting_id:
+        q = q.filter(models.JobApplication.job_posting_id == job_posting_id)
+    return q.order_by(models.JobApplication.ai_match_score.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/recruitment/applications/{app_id}", response_model=schemas.JobApplicationOut, tags=["recruitment"])
+def update_application(app_id: int, payload: schemas.JobApplicationUpdate, db: Session = Depends(get_db)):
+    app_obj = db.get(models.JobApplication, app_id)
+    if not app_obj:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(app_obj, k, v)
+    app_obj.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(app_obj)
+    return app_obj
+
+
+@app.get("/recruitment/stats", tags=["recruitment"])
+def recruitment_stats(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    qj = db.query(models.JobPosting)
+    qc = db.query(models.Candidate)
+    qa = db.query(models.JobApplication)
+    if business_id:
+        qj = qj.filter(models.JobPosting.business_id == business_id)
+        qc = qc.filter(models.Candidate.business_id == business_id)
+        qa = qa.filter(models.JobApplication.business_id == business_id)
+    return {
+        "total_jobs":         qj.count(),
+        "active_jobs":        qj.filter(models.JobPosting.status == "active").count(),
+        "total_candidates":   qc.count(),
+        "total_applications": qa.count(),
+        "in_interview":       qa.filter(models.JobApplication.stage == "interview").count(),
+        "offers_sent":        qa.filter(models.JobApplication.stage == "offer").count(),
+        "hired":              qa.filter(models.JobApplication.stage == "hired").count(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MARKETING SUITE MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/marketing/campaigns", response_model=schemas.CampaignOut, status_code=201, tags=["marketing"])
+async def create_campaign(payload: schemas.CampaignCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    campaign = models.Campaign(**payload.model_dump())
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+    # AI-generate body if not provided
+    if not campaign.body:
+        try:
+            result = await AGENT_REGISTRY["marketing"].run("create_content", {
+                "campaign_name": campaign.name,
+                "campaign_type": campaign.campaign_type,
+                "subject": campaign.subject or "",
+                "target": campaign.target_segment or "customers",
+            }, db)
+            campaign.ai_generated_body = result.get("result", {}).get("content", "")
+            db.commit()
+            db.refresh(campaign)
+        except Exception:
+            pass
+    return campaign
+
+
+@app.get("/marketing/campaigns", response_model=List[schemas.CampaignOut], tags=["marketing"])
+def list_campaigns(business_id: Optional[int] = None, status: Optional[str] = None,
+                   skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.Campaign)
+    if business_id:
+        q = q.filter(models.Campaign.business_id == business_id)
+    if status:
+        q = q.filter(models.Campaign.status == status)
+    return q.order_by(models.Campaign.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/marketing/campaigns/{campaign_id}", response_model=schemas.CampaignOut, tags=["marketing"])
+def update_campaign(campaign_id: int, payload: schemas.CampaignUpdate, db: Session = Depends(get_db)):
+    campaign = db.get(models.Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(campaign, k, v)
+    campaign.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(campaign)
+    return campaign
+
+
+@app.post("/marketing/campaigns/{campaign_id}/launch", tags=["marketing"])
+def launch_campaign(campaign_id: int, db: Session = Depends(get_db),
+                    admin: models.User = Depends(get_admin_user)):
+    campaign = db.get(models.Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    campaign.status = "active"
+    campaign.updated_at = datetime.utcnow()
+    db.commit()
+    return {"status": "launched", "campaign_id": campaign_id}
+
+
+@app.post("/marketing/forms", response_model=schemas.MarketingFormOut, status_code=201, tags=["marketing"])
+def create_marketing_form(payload: schemas.MarketingFormCreate, db: Session = Depends(get_db)):
+    form = models.MarketingForm(**payload.model_dump())
+    db.add(form)
+    db.commit()
+    db.refresh(form)
+    return form
+
+
+@app.get("/marketing/forms", response_model=List[schemas.MarketingFormOut], tags=["marketing"])
+def list_marketing_forms(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.MarketingForm)
+    if business_id:
+        q = q.filter(models.MarketingForm.business_id == business_id)
+    return q.order_by(models.MarketingForm.created_at.desc()).all()
+
+
+@app.post("/marketing/forms/{form_id}/submit", response_model=schemas.FormSubmissionOut, status_code=201, tags=["marketing"])
+def submit_form(form_id: int, payload: schemas.FormSubmissionCreate,
+                request: Request, db: Session = Depends(get_db)):
+    form = db.get(models.MarketingForm, form_id)
+    if not form or not form.is_active:
+        raise HTTPException(status_code=404, detail="Form not found or inactive.")
+    sub = models.FormSubmission(
+        form_id=form_id,
+        business_id=payload.business_id,
+        data_json=payload.data_json,
+        ip_address=request.client.host if request.client else None,
+        source_url=payload.source_url,
+    )
+    db.add(sub)
+    form.submission_count = (form.submission_count or 0) + 1
+    db.commit()
+    db.refresh(sub)
+    return sub
+
+
+@app.get("/marketing/forms/{form_id}/submissions", response_model=List[schemas.FormSubmissionOut], tags=["marketing"])
+def list_form_submissions(form_id: int, db: Session = Depends(get_db)):
+    return db.query(models.FormSubmission).filter(
+        models.FormSubmission.form_id == form_id
+    ).order_by(models.FormSubmission.created_at.desc()).limit(200).all()
+
+
+@app.get("/marketing/stats", tags=["marketing"])
+def marketing_stats(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    qc = db.query(models.Campaign)
+    qf = db.query(models.MarketingForm)
+    if business_id:
+        qc = qc.filter(models.Campaign.business_id == business_id)
+        qf = qf.filter(models.MarketingForm.business_id == business_id)
+    from sqlalchemy import func as sqlfunc
+    sent = db.query(sqlfunc.sum(models.Campaign.sent_count)).scalar() or 0
+    opens = db.query(sqlfunc.sum(models.Campaign.open_count)).scalar() or 0
+    return {
+        "total_campaigns":  qc.count(),
+        "active_campaigns": qc.filter(models.Campaign.status == "active").count(),
+        "total_sent":       int(sent),
+        "total_opens":      int(opens),
+        "open_rate_pct":    round(100 * opens / sent, 1) if sent > 0 else 0.0,
+        "total_forms":      qf.count(),
+        "total_submissions": db.query(models.FormSubmission).count(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMUNICATION HUB MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/comm-hub/ivr", response_model=schemas.IVRConfigOut, status_code=201, tags=["comm_hub"])
+async def create_ivr_config(payload: schemas.IVRConfigCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    ivr = models.IVRConfig(**payload.model_dump())
+    db.add(ivr)
+    db.commit()
+    db.refresh(ivr)
+    # AI-generate greeting if not provided
+    if not ivr.greeting_text:
+        try:
+            biz = db.query(models.Business).filter(
+                models.Business.id == ivr.business_id).first()
+            result = await AGENT_REGISTRY["voice"].run("generate_greeting", {
+                "business_name": biz.name if biz else "our company",
+                "tone": "professional and friendly",
+            }, db)
+            ivr.greeting_text = result.get("result", {}).get("greeting_script", "")
+            db.commit()
+            db.refresh(ivr)
+        except Exception:
+            pass
+    return ivr
+
+
+@app.get("/comm-hub/ivr", response_model=List[schemas.IVRConfigOut], tags=["comm_hub"])
+def list_ivr_configs(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.IVRConfig)
+    if business_id:
+        q = q.filter(models.IVRConfig.business_id == business_id)
+    return q.all()
+
+
+@app.put("/comm-hub/ivr/{ivr_id}", response_model=schemas.IVRConfigOut, tags=["comm_hub"])
+def update_ivr_config(ivr_id: int, payload: schemas.IVRConfigCreate, db: Session = Depends(get_db)):
+    ivr = db.get(models.IVRConfig, ivr_id)
+    if not ivr:
+        raise HTTPException(status_code=404, detail="IVR config not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(ivr, k, v)
+    db.commit()
+    db.refresh(ivr)
+    return ivr
+
+
+@app.post("/comm-hub/phone-numbers", response_model=schemas.PhoneNumberOut, status_code=201, tags=["comm_hub"])
+def create_phone_number(payload: schemas.PhoneNumberCreate, db: Session = Depends(get_db)):
+    pn = models.PhoneNumber(**payload.model_dump())
+    db.add(pn)
+    db.commit()
+    db.refresh(pn)
+    return pn
+
+
+@app.get("/comm-hub/phone-numbers", response_model=List[schemas.PhoneNumberOut], tags=["comm_hub"])
+def list_phone_numbers(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.PhoneNumber)
+    if business_id:
+        q = q.filter(models.PhoneNumber.business_id == business_id)
+    return q.filter(models.PhoneNumber.is_active == True).all()
+
+
+@app.post("/comm-hub/generate-ivr-menu", tags=["comm_hub"])
+async def generate_ivr_menu(payload: dict, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    result = await AGENT_REGISTRY["voice"].run("generate_ivr_menu", payload, db)
+    return result.get("result", result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CALLTRACK AI MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/calltrack/numbers", response_model=schemas.CallTrackingNumberOut, status_code=201, tags=["calltrack"])
+def create_tracking_number(payload: schemas.CallTrackingNumberCreate, db: Session = Depends(get_db)):
+    tn = models.CallTrackingNumber(**payload.model_dump())
+    db.add(tn)
+    db.commit()
+    db.refresh(tn)
+    return tn
+
+
+@app.get("/calltrack/numbers", response_model=List[schemas.CallTrackingNumberOut], tags=["calltrack"])
+def list_tracking_numbers(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.CallTrackingNumber)
+    if business_id:
+        q = q.filter(models.CallTrackingNumber.business_id == business_id)
+    return q.filter(models.CallTrackingNumber.is_active == True).all()
+
+
+@app.post("/calltrack/events", response_model=schemas.CallTrackingEventOut, status_code=201, tags=["calltrack"])
+async def log_tracking_event(payload: schemas.CallTrackingEventCreate, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    event = models.CallTrackingEvent(**payload.model_dump())
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    # Update tracking number counts
+    if event.tracking_number_id:
+        tn = db.get(models.CallTrackingNumber, event.tracking_number_id)
+        if tn:
+            tn.total_calls = (tn.total_calls or 0) + 1
+            if event.is_conversion:
+                tn.conversions = (tn.conversions or 0) + 1
+            db.commit()
+    return event
+
+
+@app.get("/calltrack/events", response_model=List[schemas.CallTrackingEventOut], tags=["calltrack"])
+def list_tracking_events(business_id: Optional[int] = None, skip: int = 0,
+                         limit: int = 100, db: Session = Depends(get_db)):
+    q = db.query(models.CallTrackingEvent)
+    if business_id:
+        q = q.filter(models.CallTrackingEvent.business_id == business_id)
+    return q.order_by(models.CallTrackingEvent.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/calltrack/analytics", tags=["calltrack"])
+def calltrack_analytics(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    qn = db.query(models.CallTrackingNumber)
+    qe = db.query(models.CallTrackingEvent)
+    if business_id:
+        qn = qn.filter(models.CallTrackingNumber.business_id == business_id)
+        qe = qe.filter(models.CallTrackingEvent.business_id == business_id)
+    from sqlalchemy import func as sqlfunc
+    total_calls = qe.count()
+    conversions = qe.filter(models.CallTrackingEvent.is_conversion == True).count()
+    avg_duration = db.query(sqlfunc.avg(models.CallTrackingEvent.call_duration_secs)).scalar() or 0
+    revenue = db.query(sqlfunc.sum(models.CallTrackingEvent.revenue_attributed)).scalar() or 0
+    return {
+        "total_tracking_numbers": qn.count(),
+        "total_calls":            total_calls,
+        "total_conversions":      conversions,
+        "conversion_rate_pct":    round(100 * conversions / total_calls, 1) if total_calls > 0 else 0.0,
+        "avg_call_duration_secs": round(float(avg_duration), 1),
+        "total_revenue_attributed": round(float(revenue), 2),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONTACT CENTER MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/contact-center/queues", response_model=schemas.AgentQueueOut, status_code=201, tags=["contact_center"])
+def create_queue(payload: schemas.AgentQueueCreate, db: Session = Depends(get_db)):
+    queue = models.AgentQueue(**payload.model_dump())
+    db.add(queue)
+    db.commit()
+    db.refresh(queue)
+    return queue
+
+
+@app.get("/contact-center/queues", response_model=List[schemas.AgentQueueOut], tags=["contact_center"])
+def list_queues(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.AgentQueue)
+    if business_id:
+        q = q.filter(models.AgentQueue.business_id == business_id)
+    return q.filter(models.AgentQueue.is_active == True).all()
+
+
+@app.put("/contact-center/queues/{queue_id}", tags=["contact_center"])
+def update_queue(queue_id: int, payload: schemas.AgentQueueCreate, db: Session = Depends(get_db)):
+    queue = db.get(models.AgentQueue, queue_id)
+    if not queue:
+        raise HTTPException(status_code=404, detail="Queue not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(queue, k, v)
+    db.commit()
+    return {"detail": "Queue updated."}
+
+
+@app.post("/contact-center/support-ticket", tags=["contact_center"])
+async def resolve_support_ticket(payload: dict, db: Session = Depends(get_db)):
+    from .agents import AGENT_REGISTRY
+    result = await AGENT_REGISTRY["support"].run("resolve_ticket", payload, db)
+    return result.get("result", result)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTOMATION & WORKFLOW ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/automation/workflows", response_model=schemas.WorkflowOut, status_code=201, tags=["automation"])
+def create_workflow(payload: schemas.WorkflowCreate, db: Session = Depends(get_db)):
+    wf = models.Workflow(**payload.model_dump())
+    db.add(wf)
+    db.commit()
+    db.refresh(wf)
+    return wf
+
+
+@app.get("/automation/workflows", response_model=List[schemas.WorkflowOut], tags=["automation"])
+def list_workflows(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.Workflow)
+    if business_id:
+        q = q.filter(models.Workflow.business_id == business_id)
+    return q.order_by(models.Workflow.created_at.desc()).all()
+
+
+@app.put("/automation/workflows/{wf_id}", response_model=schemas.WorkflowOut, tags=["automation"])
+def update_workflow(wf_id: int, payload: schemas.WorkflowUpdate, db: Session = Depends(get_db)):
+    wf = db.get(models.Workflow, wf_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(wf, k, v)
+    wf.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(wf)
+    return wf
+
+
+@app.post("/automation/workflows/{wf_id}/run", tags=["automation"])
+async def run_workflow(wf_id: int, trigger_data: Optional[dict] = None,
+                       db: Session = Depends(get_db)):
+    wf = db.get(models.Workflow, wf_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found.")
+    if not wf.is_active:
+        raise HTTPException(status_code=400, detail="Workflow is not active.")
+    execution = models.WorkflowExecution(
+        workflow_id=wf_id,
+        business_id=wf.business_id,
+        status="running",
+        trigger_data=json.dumps(trigger_data or {}),
+    )
+    db.add(execution)
+    wf.run_count = (wf.run_count or 0) + 1
+    wf.last_run_at = datetime.utcnow()
+    db.commit()
+    db.refresh(execution)
+    # Simulate step execution
+    steps = json.loads(wf.steps or "[]")
+    execution.steps_completed = len(steps)
+    execution.status = "completed"
+    execution.completed_at = datetime.utcnow()
+    db.commit()
+    return {"execution_id": execution.id, "status": "completed", "steps_run": len(steps)}
+
+
+@app.get("/automation/executions", response_model=List[schemas.WorkflowExecutionOut], tags=["automation"])
+def list_executions(business_id: Optional[int] = None, workflow_id: Optional[int] = None,
+                    skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+    q = db.query(models.WorkflowExecution)
+    if business_id:
+        q = q.filter(models.WorkflowExecution.business_id == business_id)
+    if workflow_id:
+        q = q.filter(models.WorkflowExecution.workflow_id == workflow_id)
+    return q.order_by(models.WorkflowExecution.started_at.desc()).offset(skip).limit(limit).all()
+
+
+@app.post("/automation/webhooks", response_model=schemas.WebhookConfigOut, status_code=201, tags=["automation"])
+def create_webhook(payload: schemas.WebhookConfigCreate, db: Session = Depends(get_db)):
+    wh = models.WebhookConfig(**payload.model_dump())
+    db.add(wh)
+    db.commit()
+    db.refresh(wh)
+    return wh
+
+
+@app.get("/automation/webhooks", response_model=List[schemas.WebhookConfigOut], tags=["automation"])
+def list_webhooks(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.WebhookConfig)
+    if business_id:
+        q = q.filter(models.WebhookConfig.business_id == business_id)
+    return q.filter(models.WebhookConfig.is_active == True).all()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMARTBOSS AI — EXECUTIVE INTELLIGENCE DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/smartboss/overview", tags=["smartboss"])
+def smartboss_overview(business_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Master business intelligence snapshot across all modules."""
+    from sqlalchemy import func as sqlfunc
+
+    def _filt(q, model):
+        if business_id:
+            return q.filter(getattr(model, "business_id", None) == business_id)
+        return q
+
+    total_revenue = db.query(sqlfunc.sum(models.Business.revenue)).scalar() or 0
+    pipeline_val  = db.query(sqlfunc.sum(models.Deal.value)).filter(
+        models.Deal.status == "open").scalar() or 0
+    won_val       = db.query(sqlfunc.sum(models.Deal.value)).filter(
+        models.Deal.status == "won").scalar() or 0
+
+    return {
+        "module": "SmartBoss AI Overview",
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "crm": {
+            "total_leads":      db.query(models.Lead).count(),
+            "new_leads":        db.query(models.Lead).filter(models.Lead.status == "new").count(),
+            "pipeline_value":   round(float(pipeline_val), 2),
+            "won_value":        round(float(won_val), 2),
+            "total_deals":      db.query(models.Deal).count(),
+        },
+        "recruitment": {
+            "active_jobs":      db.query(models.JobPosting).filter(models.JobPosting.status == "active").count(),
+            "total_candidates": db.query(models.Candidate).count(),
+            "applications":     db.query(models.JobApplication).count(),
+            "hired":            db.query(models.JobApplication).filter(models.JobApplication.stage == "hired").count(),
+        },
+        "marketing": {
+            "active_campaigns": db.query(models.Campaign).filter(models.Campaign.status == "active").count(),
+            "total_forms":      db.query(models.MarketingForm).count(),
+            "form_submissions": db.query(models.FormSubmission).count(),
+        },
+        "operations": {
+            "total_businesses":    db.query(models.Business).filter(models.Business.is_active == True).count(),
+            "total_appointments":  db.query(models.Appointment).count(),
+            "pending_approvals":   db.query(models.DataEntryJob).filter(
+                                       models.DataEntryJob.status == "pending_admin_approval").count(),
+            "total_patients":      db.query(models.Patient).count(),
+            "total_calls":         db.query(models.CallLog).count(),
+        },
+        "revenue": {
+            "total_business_revenue": round(float(total_revenue), 2),
+            "bookkeeping_pending":    db.query(models.BookkeepingEntry).filter(
+                                          models.BookkeepingEntry.status == "draft").count(),
+        },
+        "calltrack": {
+            "tracking_numbers": db.query(models.CallTrackingNumber).count(),
+            "tracked_calls":    db.query(models.CallTrackingEvent).count(),
+            "conversions":      db.query(models.CallTrackingEvent).filter(
+                                    models.CallTrackingEvent.is_conversion == True).count(),
+        },
+        "automation": {
+            "workflows":        db.query(models.Workflow).count(),
+            "active_workflows": db.query(models.Workflow).filter(models.Workflow.is_active == True).count(),
+            "total_runs":       db.query(models.WorkflowExecution).count(),
+        },
+    }
+
+
+@app.post("/smartboss/query", tags=["smartboss"])
+async def smartboss_nl_query(payload: schemas.SmartBossQueryRequest, db: Session = Depends(get_db)):
+    """Natural language Q&A powered by SmartBoss AI."""
+    try:
+        import anthropic, os
+        overview = smartboss_overview(payload.business_id, db)
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=(
+                "You are SmartBoss AI, an intelligent business analytics assistant for EZ-NEXUS AI Platform. "
+                "Analyze the provided business data and answer the question with actionable insights. "
+                "Be concise, data-driven, and recommend specific next steps."
+            ),
+            messages=[{
+                "role": "user",
+                "content": f"Business Data:\n{json.dumps(overview, indent=2)}\n\nQuestion: {payload.question}"
+            }],
+        )
+        answer = msg.content[0].text
+    except Exception as e:
+        answer = f"SmartBoss AI is analyzing your data. (AI unavailable: {e})"
+    return {"question": payload.question, "answer": answer, "data_snapshot": overview}
+
+
+@app.get("/smartboss/insights", response_model=List[schemas.SmartBossInsightOut], tags=["smartboss"])
+def list_smartboss_insights(business_id: Optional[int] = None, is_read: Optional[bool] = None,
+                             limit: int = 20, db: Session = Depends(get_db)):
+    q = db.query(models.SmartBossInsight)
+    if business_id:
+        q = q.filter(models.SmartBossInsight.business_id == business_id)
+    if is_read is not None:
+        q = q.filter(models.SmartBossInsight.is_read == is_read)
+    return q.order_by(models.SmartBossInsight.created_at.desc()).limit(limit).all()
+
+
+@app.post("/smartboss/insights/generate", tags=["smartboss"])
+async def generate_smartboss_insights(business_id: Optional[int] = None,
+                                       db: Session = Depends(get_db),
+                                       admin: models.User = Depends(get_admin_user)):
+    """AI-generate fresh SmartBoss insights based on current platform data."""
+    overview = smartboss_overview(business_id, db)
+    insights_created = []
+    try:
+        import anthropic, os
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2048,
+            system="You are SmartBoss AI. Generate 3-5 business insights as JSON array. Each: {type, title, summary, recommendation, priority}",
+            messages=[{"role": "user", "content": f"Data: {json.dumps(overview)}"}],
+        )
+        import re
+        raw = msg.content[0].text
+        match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if match:
+            items = json.loads(match.group())
+            for item in items[:5]:
+                insight = models.SmartBossInsight(
+                    business_id=business_id,
+                    insight_type=item.get("type", "operations"),
+                    title=item.get("title", "Insight"),
+                    summary=item.get("summary", ""),
+                    recommendation=item.get("recommendation", ""),
+                    priority=item.get("priority", "medium"),
+                )
+                db.add(insight)
+                insights_created.append(item.get("title", ""))
+        db.commit()
+    except Exception as e:
+        return {"error": str(e), "insights_created": 0}
+    return {"insights_created": len(insights_created), "titles": insights_created}
+
+
+@app.put("/smartboss/insights/{insight_id}/read", tags=["smartboss"])
+def mark_insight_read(insight_id: int, db: Session = Depends(get_db)):
+    insight = db.get(models.SmartBossInsight, insight_id)
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found.")
+    insight.is_read = True
+    db.commit()
+    return {"status": "read", "insight_id": insight_id}

@@ -1,4 +1,4 @@
-"""EZ-NEXUS AI — Agent Registry (18 agents total)"""
+"""EZ-NEXUS AI — Agent Registry (21 agents total)"""
 from .base import BaseAgent
 from .specialized import (
     AppointmentAgent,
@@ -14,6 +14,9 @@ from .specialized import (
     DMEProductMatchingAgent,
     SupplierMarketplaceAgent,
     ComplianceAgent,
+    SupportAgent,
+    VoiceAgent,
+    RecruitmentAgent,
 )
 from .data_entry import (
     MedicalDataEntryAgent,
@@ -44,6 +47,10 @@ AGENT_REGISTRY: dict[str, BaseAgent] = {
     "excel_automation":       ExcelAutomationAgent(),
     "bookkeeping_entry":      BookkeepingEntryAgent(),
     "data_verification":      DataVerificationAgent(),
+    # ── Enterprise Expansion 3 agents ────────────────────────
+    "support":                SupportAgent(),
+    "voice":                  VoiceAgent(),
+    "recruitment":            RecruitmentAgent(),
 }
 
 __all__ = ["BaseAgent", "AGENT_REGISTRY"]

@@ -263,3 +263,138 @@ class ComplianceAgent(BaseAgent):
             )
             return {"checklist": await _claude(prompt)}
         return {"detail": "Compliance task received"}
+
+
+# ── 14. Support Agent ─────────────────────────────────────────────────────────
+
+class SupportAgent(BaseAgent):
+    name = "Support Agent"
+    description = "AI-powered customer support: chat, tickets, knowledge base, troubleshooting"
+    category = "support"
+    status = "active"
+    icon = "🎫"
+
+    async def handle(self, task_type: str, payload: dict, db: Any = None) -> dict:
+        if task_type == "resolve_ticket":
+            prompt = (
+                "You are a professional customer support agent. Provide a helpful, empathetic resolution.\n"
+                f"Issue: {payload.get('issue', '')}\n"
+                f"Customer context: {payload.get('customer_info', 'N/A')}\n"
+                "Respond with: 1) Solution steps, 2) Escalation recommendation if needed."
+            )
+            return {"resolution": await _claude(prompt), "ticket_handled": True}
+        if task_type == "generate_kb_article":
+            prompt = (
+                f"Write a clear, concise knowledge base article about: {payload.get('topic', '')}\n"
+                "Include: Title, Problem Statement, Step-by-Step Solution, FAQ."
+            )
+            return {"kb_article": await _claude(prompt)}
+        if task_type == "analyze_sentiment":
+            prompt = (
+                f"Analyze the customer sentiment in this message and rate urgency (1-5):\n"
+                f"{payload.get('message', '')}\n"
+                "Return: sentiment (positive/neutral/negative), urgency score, recommended action."
+            )
+            return {"analysis": await _claude(prompt)}
+        return {"detail": "Support task received", "payload": payload}
+
+
+# ── 15. Voice Agent ───────────────────────────────────────────────────────────
+
+class VoiceAgent(BaseAgent):
+    name = "Voice AI Receptionist"
+    description = "AI receptionist: answers calls 24/7, routes inquiries, books appointments, sends follow-ups"
+    category = "communication"
+    status = "active"
+    icon = "🎙️"
+
+    async def handle(self, task_type: str, payload: dict, db: Any = None) -> dict:
+        if task_type == "generate_greeting":
+            biz = payload.get("business_name", "our business")
+            tone = payload.get("tone", "professional and friendly")
+            prompt = (
+                f"Write an AI phone receptionist greeting for '{biz}'. "
+                f"Tone: {tone}. Max 3 sentences. Include call routing options."
+            )
+            return {"greeting_script": await _claude(prompt)}
+        if task_type == "generate_ivr_menu":
+            departments = payload.get("departments", ["Sales", "Support", "Billing", "Appointments"])
+            prompt = (
+                f"Create an IVR phone menu for these departments: {departments}\n"
+                "Format: key number, department name, brief description. Include 0 for operator."
+            )
+            return {"ivr_menu": await _claude(prompt)}
+        if task_type == "call_summary":
+            prompt = (
+                "Summarize this call transcript and extract action items:\n"
+                f"Transcript: {payload.get('transcript', '')}\n"
+                "Return: Summary, Customer Intent, Action Items, Follow-up Required (yes/no)."
+            )
+            return {"summary": await _claude(prompt)}
+        if task_type == "generate_followup_sms":
+            prompt = (
+                f"Write a professional follow-up SMS after a call for: {payload.get('context', '')}\n"
+                "Max 160 characters. Include next steps and contact info placeholder."
+            )
+            return {"sms": await _claude(prompt)}
+        return {"detail": "Voice agent task received", "payload": payload}
+
+
+# ── 16. Recruitment Agent ─────────────────────────────────────────────────────
+
+class RecruitmentAgent(BaseAgent):
+    name = "Recruitment Agent"
+    description = "AI-powered ATS: job posting, resume screening, candidate matching, interview scheduling"
+    category = "recruitment"
+    status = "active"
+    icon = "👔"
+
+    async def handle(self, task_type: str, payload: dict, db: Any = None) -> dict:
+        if task_type == "generate_job_description":
+            prompt = (
+                f"Write a compelling, inclusive job description for:\n"
+                f"Title: {payload.get('title', '')}\n"
+                f"Department: {payload.get('department', '')}\n"
+                f"Requirements: {payload.get('requirements', '')}\n"
+                f"Salary: {payload.get('salary', 'Competitive')}\n"
+                "Include: Overview, Responsibilities (5-7 bullets), Requirements (5-7 bullets), "
+                "Benefits, EEO statement."
+            )
+            return {"job_description": await _claude(prompt)}
+        if task_type == "screen_resume":
+            prompt = (
+                f"Screen this resume against the job requirements and provide a match score.\n"
+                f"Job Title: {payload.get('job_title', '')}\n"
+                f"Requirements: {payload.get('requirements', '')}\n"
+                f"Resume Text: {payload.get('resume_text', '')}\n"
+                "Return: Match Score (0-100), Key Strengths, Gaps, Recommendation (advance/reject/hold)."
+            )
+            return {"screening": await _claude(prompt)}
+        if task_type == "match_candidates":
+            prompt = (
+                f"Rank and match candidates for this job opening:\n"
+                f"Job: {payload.get('job_title', '')}\n"
+                f"Required skills: {payload.get('required_skills', '')}\n"
+                f"Candidate pool: {payload.get('candidates', [])}\n"
+                "Rank by fit score, explain top 3 picks."
+            )
+            return {"matches": await _claude(prompt)}
+        if task_type == "generate_interview_questions":
+            prompt = (
+                f"Generate 10 targeted interview questions for:\n"
+                f"Role: {payload.get('role', '')}\n"
+                f"Level: {payload.get('level', 'mid-level')}\n"
+                "Include: 3 behavioral, 3 technical, 2 situational, 2 culture-fit questions."
+            )
+            return {"questions": await _claude(prompt)}
+        if task_type == "draft_offer_letter":
+            prompt = (
+                f"Draft a professional offer letter for:\n"
+                f"Candidate: {payload.get('candidate_name', '')}\n"
+                f"Role: {payload.get('role', '')}\n"
+                f"Salary: {payload.get('salary', '')}\n"
+                f"Start Date: {payload.get('start_date', 'TBD')}\n"
+                "Professional tone, include contingencies and acceptance deadline."
+            )
+            return {"offer_letter": await _claude(prompt)}
+        return {"detail": "Recruitment task received", "payload": payload}

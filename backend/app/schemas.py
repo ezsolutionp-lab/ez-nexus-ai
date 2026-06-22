@@ -723,3 +723,526 @@ class FutureAgentBlueprintRequest(BaseModel):
     required_tools:  Optional[List[str]] = []
     data_inputs:     Optional[List[str]] = []
     data_outputs:    Optional[List[str]] = []
+
+
+# ─── CRM & Sales Schemas ───────────────────────────────────────────────────────
+
+class LeadCreate(BaseModel):
+    business_id: int
+    first_name:  str
+    last_name:   Optional[str] = None
+    email:       Optional[str] = None
+    phone:       Optional[str] = None
+    company:     Optional[str] = None
+    source:      Optional[str] = None
+    assigned_to: Optional[str] = None
+    notes:       Optional[str] = None
+    tags:        Optional[str] = None
+
+class LeadUpdate(BaseModel):
+    first_name:  Optional[str] = None
+    last_name:   Optional[str] = None
+    email:       Optional[str] = None
+    phone:       Optional[str] = None
+    company:     Optional[str] = None
+    source:      Optional[str] = None
+    status:      Optional[str] = None
+    score:       Optional[int] = None
+    assigned_to: Optional[str] = None
+    notes:       Optional[str] = None
+    tags:        Optional[str] = None
+
+class LeadOut(BaseModel):
+    id:          int
+    business_id: int
+    first_name:  str
+    last_name:   Optional[str]
+    email:       Optional[str]
+    phone:       Optional[str]
+    company:     Optional[str]
+    source:      Optional[str]
+    status:      str
+    score:       int
+    assigned_to: Optional[str]
+    notes:       Optional[str]
+    ai_notes:    Optional[str]
+    tags:        Optional[str]
+    created_at:  datetime
+    model_config = {"from_attributes": True}
+
+
+class PipelineCreate(BaseModel):
+    business_id: int
+    name:        str
+    stages:      Optional[str] = None
+    is_default:  Optional[bool] = False
+
+class PipelineOut(BaseModel):
+    id:          int
+    business_id: int
+    name:        str
+    stages:      Optional[str]
+    is_default:  bool
+    created_at:  datetime
+    model_config = {"from_attributes": True}
+
+
+class DealCreate(BaseModel):
+    business_id:    int
+    pipeline_id:    Optional[int] = None
+    lead_id:        Optional[int] = None
+    title:          str
+    stage:          Optional[str] = "prospecting"
+    value:          Optional[float] = 0.0
+    probability:    Optional[int] = 20
+    expected_close: Optional[str] = None
+    assigned_to:    Optional[str] = None
+    notes:          Optional[str] = None
+
+class DealUpdate(BaseModel):
+    title:          Optional[str] = None
+    stage:          Optional[str] = None
+    value:          Optional[float] = None
+    probability:    Optional[int] = None
+    expected_close: Optional[str] = None
+    assigned_to:    Optional[str] = None
+    status:         Optional[str] = None
+    notes:          Optional[str] = None
+
+class DealOut(BaseModel):
+    id:             int
+    business_id:    int
+    pipeline_id:    Optional[int]
+    lead_id:        Optional[int]
+    title:          str
+    stage:          str
+    value:          float
+    probability:    int
+    expected_close: Optional[str]
+    assigned_to:    Optional[str]
+    status:         str
+    notes:          Optional[str]
+    created_at:     datetime
+    model_config = {"from_attributes": True}
+
+
+class QuoteCreate(BaseModel):
+    business_id:  int
+    deal_id:      Optional[int] = None
+    title:        str
+    client_name:  Optional[str] = None
+    client_email: Optional[str] = None
+    line_items:   Optional[str] = None
+    subtotal:     Optional[float] = 0.0
+    tax_rate:     Optional[float] = 0.0
+    total:        Optional[float] = 0.0
+    notes:        Optional[str] = None
+    valid_until:  Optional[str] = None
+
+class QuoteOut(BaseModel):
+    id:           int
+    business_id:  int
+    deal_id:      Optional[int]
+    quote_number: Optional[str]
+    title:        str
+    client_name:  Optional[str]
+    client_email: Optional[str]
+    line_items:   Optional[str]
+    subtotal:     float
+    tax_rate:     float
+    total:        float
+    status:       str
+    notes:        Optional[str]
+    valid_until:  Optional[str]
+    created_at:   datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── Recruitment Schemas ───────────────────────────────────────────────────────
+
+class JobPostingCreate(BaseModel):
+    business_id:     int
+    title:           str
+    department:      Optional[str] = None
+    location:        Optional[str] = None
+    job_type:        Optional[str] = "full_time"
+    remote_option:   Optional[str] = "on_site"
+    description:     Optional[str] = None
+    requirements:    Optional[str] = None
+    salary_min:      Optional[float] = None
+    salary_max:      Optional[float] = None
+    salary_currency: Optional[str] = "USD"
+
+class JobPostingUpdate(BaseModel):
+    title:          Optional[str] = None
+    department:     Optional[str] = None
+    location:       Optional[str] = None
+    job_type:       Optional[str] = None
+    remote_option:  Optional[str] = None
+    description:    Optional[str] = None
+    requirements:   Optional[str] = None
+    salary_min:     Optional[float] = None
+    salary_max:     Optional[float] = None
+    status:         Optional[str] = None
+    posted_boards:  Optional[str] = None
+
+class JobPostingOut(BaseModel):
+    id:              int
+    business_id:     int
+    title:           str
+    department:      Optional[str]
+    location:        Optional[str]
+    job_type:        str
+    remote_option:   str
+    description:     Optional[str]
+    requirements:    Optional[str]
+    salary_min:      Optional[float]
+    salary_max:      Optional[float]
+    salary_currency: str
+    status:          str
+    posted_boards:   Optional[str]
+    ai_description:  Optional[str]
+    created_at:      datetime
+    model_config = {"from_attributes": True}
+
+
+class CandidateCreate(BaseModel):
+    business_id:      int
+    first_name:       str
+    last_name:        str
+    email:            Optional[str] = None
+    phone:            Optional[str] = None
+    location:         Optional[str] = None
+    linkedin_url:     Optional[str] = None
+    skills:           Optional[str] = None
+    experience_years: Optional[int] = None
+    education:        Optional[str] = None
+    notes:            Optional[str] = None
+
+class CandidateOut(BaseModel):
+    id:               int
+    business_id:      int
+    first_name:       str
+    last_name:        str
+    email:            Optional[str]
+    phone:            Optional[str]
+    location:         Optional[str]
+    linkedin_url:     Optional[str]
+    skills:           Optional[str]
+    experience_years: Optional[int]
+    education:        Optional[str]
+    ai_summary:       Optional[str]
+    ai_score:         float
+    status:           str
+    notes:            Optional[str]
+    created_at:       datetime
+    model_config = {"from_attributes": True}
+
+
+class JobApplicationCreate(BaseModel):
+    business_id:    int
+    job_posting_id: int
+    candidate_id:   int
+    recruiter_notes: Optional[str] = None
+
+class JobApplicationUpdate(BaseModel):
+    stage:           Optional[str] = None
+    recruiter_notes: Optional[str] = None
+    interview_date:  Optional[str] = None
+    offer_amount:    Optional[float] = None
+    status:          Optional[str] = None
+
+class JobApplicationOut(BaseModel):
+    id:              int
+    business_id:     int
+    job_posting_id:  int
+    candidate_id:    int
+    stage:           str
+    ai_match_score:  float
+    ai_feedback:     Optional[str]
+    recruiter_notes: Optional[str]
+    interview_date:  Optional[str]
+    offer_amount:    Optional[float]
+    status:          str
+    created_at:      datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── Marketing Suite Schemas ───────────────────────────────────────────────────
+
+class CampaignCreate(BaseModel):
+    business_id:    int
+    name:           str
+    campaign_type:  Optional[str] = "email"
+    subject:        Optional[str] = None
+    body:           Optional[str] = None
+    target_segment: Optional[str] = "all"
+    scheduled_at:   Optional[datetime] = None
+
+class CampaignUpdate(BaseModel):
+    name:           Optional[str] = None
+    campaign_type:  Optional[str] = None
+    subject:        Optional[str] = None
+    body:           Optional[str] = None
+    target_segment: Optional[str] = None
+    status:         Optional[str] = None
+    scheduled_at:   Optional[datetime] = None
+
+class CampaignOut(BaseModel):
+    id:                int
+    business_id:       int
+    name:              str
+    campaign_type:     str
+    status:            str
+    subject:           Optional[str]
+    body:              Optional[str]
+    ai_generated_body: Optional[str]
+    target_segment:    Optional[str]
+    scheduled_at:      Optional[datetime]
+    sent_count:        int
+    open_count:        int
+    click_count:       int
+    conversion_count:  int
+    created_at:        datetime
+    model_config = {"from_attributes": True}
+
+
+class MarketingFormCreate(BaseModel):
+    business_id:       int
+    name:              str
+    form_type:         Optional[str] = "lead_capture"
+    fields_json:       Optional[str] = None
+    thank_you_message: Optional[str] = None
+
+class MarketingFormOut(BaseModel):
+    id:                int
+    business_id:       int
+    name:              str
+    form_type:         str
+    fields_json:       Optional[str]
+    thank_you_message: Optional[str]
+    is_active:         bool
+    submission_count:  int
+    created_at:        datetime
+    model_config = {"from_attributes": True}
+
+
+class FormSubmissionCreate(BaseModel):
+    form_id:     int
+    business_id: int
+    data_json:   Optional[str] = None
+    source_url:  Optional[str] = None
+
+class FormSubmissionOut(BaseModel):
+    id:          int
+    form_id:     int
+    business_id: int
+    data_json:   Optional[str]
+    ip_address:  Optional[str]
+    source_url:  Optional[str]
+    created_at:  datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── Communication Hub Schemas ─────────────────────────────────────────────────
+
+class IVRConfigCreate(BaseModel):
+    business_id:     int
+    name:            str
+    greeting_text:   Optional[str] = None
+    menu_options:    Optional[str] = None
+    fallback_action: Optional[str] = "voicemail"
+    ai_enabled:      Optional[bool] = True
+    ai_voice:        Optional[str] = "nova"
+
+class IVRConfigOut(BaseModel):
+    id:              int
+    business_id:     int
+    name:            str
+    greeting_text:   Optional[str]
+    menu_options:    Optional[str]
+    fallback_action: str
+    ai_enabled:      bool
+    ai_voice:        str
+    is_active:       bool
+    created_at:      datetime
+    model_config = {"from_attributes": True}
+
+
+class PhoneNumberCreate(BaseModel):
+    business_id:  int
+    number:       str
+    number_type:  Optional[str] = "local"
+    provider:     Optional[str] = "twilio"
+    purpose:      Optional[str] = None
+    ivr_config_id: Optional[int] = None
+    monthly_cost: Optional[float] = 1.0
+
+class PhoneNumberOut(BaseModel):
+    id:            int
+    business_id:   int
+    number:        str
+    number_type:   str
+    provider:      str
+    is_active:     bool
+    purpose:       Optional[str]
+    ivr_config_id: Optional[int]
+    monthly_cost:  float
+    created_at:    datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── CallTrack AI Schemas ──────────────────────────────────────────────────────
+
+class CallTrackingNumberCreate(BaseModel):
+    business_id:    int
+    campaign_name:  str
+    phone_number_id: Optional[int] = None
+    source:         Optional[str] = None
+    medium:         Optional[str] = None
+    utm_campaign:   Optional[str] = None
+
+class CallTrackingNumberOut(BaseModel):
+    id:              int
+    business_id:     int
+    phone_number_id: Optional[int]
+    campaign_name:   str
+    source:          Optional[str]
+    medium:          Optional[str]
+    utm_campaign:    Optional[str]
+    total_calls:     int
+    conversions:     int
+    is_active:       bool
+    created_at:      datetime
+    model_config = {"from_attributes": True}
+
+
+class CallTrackingEventCreate(BaseModel):
+    tracking_number_id: Optional[int] = None
+    business_id:        int
+    caller_phone:       Optional[str] = None
+    call_duration_secs: Optional[int] = 0
+    is_conversion:      Optional[bool] = False
+
+class CallTrackingEventOut(BaseModel):
+    id:                 int
+    tracking_number_id: Optional[int]
+    business_id:        int
+    caller_phone:       Optional[str]
+    call_duration_secs: int
+    is_conversion:      bool
+    sentiment:          Optional[str]
+    ai_summary:         Optional[str]
+    revenue_attributed: float
+    created_at:         datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── Contact Center Schemas ────────────────────────────────────────────────────
+
+class AgentQueueCreate(BaseModel):
+    business_id:      int
+    name:             str
+    queue_type:       Optional[str] = "inbound"
+    max_wait_secs:    Optional[int] = 120
+    greeting_message: Optional[str] = None
+    agents_assigned:  Optional[str] = None
+
+class AgentQueueOut(BaseModel):
+    id:               int
+    business_id:      int
+    name:             str
+    queue_type:       str
+    max_wait_secs:    int
+    greeting_message: Optional[str]
+    agents_assigned:  Optional[str]
+    is_active:        bool
+    created_at:       datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── Automation & Workflow Schemas ─────────────────────────────────────────────
+
+class WorkflowCreate(BaseModel):
+    business_id:    int
+    name:           str
+    description:    Optional[str] = None
+    trigger_type:   str
+    trigger_config: Optional[str] = None
+    steps:          Optional[str] = None
+
+class WorkflowUpdate(BaseModel):
+    name:           Optional[str] = None
+    description:    Optional[str] = None
+    trigger_type:   Optional[str] = None
+    trigger_config: Optional[str] = None
+    steps:          Optional[str] = None
+    is_active:      Optional[bool] = None
+
+class WorkflowOut(BaseModel):
+    id:             int
+    business_id:    int
+    name:           str
+    description:    Optional[str]
+    trigger_type:   str
+    trigger_config: Optional[str]
+    steps:          Optional[str]
+    is_active:      bool
+    run_count:      int
+    last_run_at:    Optional[datetime]
+    created_at:     datetime
+    model_config = {"from_attributes": True}
+
+
+class WorkflowExecutionOut(BaseModel):
+    id:              int
+    workflow_id:     int
+    business_id:     int
+    status:          str
+    trigger_data:    Optional[str]
+    steps_completed: int
+    error_message:   Optional[str]
+    started_at:      datetime
+    completed_at:    Optional[datetime]
+    model_config = {"from_attributes": True}
+
+
+class WebhookConfigCreate(BaseModel):
+    business_id: int
+    name:        str
+    url:         str
+    events:      Optional[str] = None
+    secret_key:  Optional[str] = None
+
+class WebhookConfigOut(BaseModel):
+    id:                int
+    business_id:       int
+    name:              str
+    url:               str
+    events:            Optional[str]
+    is_active:         bool
+    last_triggered_at: Optional[datetime]
+    fail_count:        int
+    created_at:        datetime
+    model_config = {"from_attributes": True}
+
+
+# ─── SmartBoss AI Schemas ──────────────────────────────────────────────────────
+
+class SmartBossInsightOut(BaseModel):
+    id:             int
+    business_id:    Optional[int]
+    insight_type:   str
+    title:          str
+    summary:        Optional[str]
+    data_json:      Optional[str]
+    recommendation: Optional[str]
+    priority:       str
+    is_read:        bool
+    created_at:     datetime
+    model_config = {"from_attributes": True}
+
+
+class SmartBossQueryRequest(BaseModel):
+    question:    str
+    business_id: Optional[int] = None
