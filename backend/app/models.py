@@ -729,3 +729,120 @@ class SmartBossInsight(Base):
     priority        = Column(String(40), default="medium")   # high|medium|low
     is_read         = Column(Boolean, default=False)
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Invoices ──────────────────────────────────────────────────────────────────
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    business_id    = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
+    invoice_number = Column(String(50), unique=True, nullable=False, index=True)
+    client_name    = Column(String(200), nullable=False)
+    client_email   = Column(String(200), nullable=True)
+    client_phone   = Column(String(30), nullable=True)
+    client_address = Column(Text, nullable=True)
+    due_date       = Column(DateTime(timezone=True), nullable=True)
+    items          = Column(Text, nullable=True)   # JSON string
+    subtotal       = Column(Float, default=0.0)
+    tax_rate       = Column(Float, default=0.0)
+    tax_amount     = Column(Float, default=0.0)
+    total          = Column(Float, default=0.0)
+    status         = Column(String(30), default="draft")  # draft | sent | paid | overdue
+    notes          = Column(Text, nullable=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at     = Column(DateTime(timezone=True), onupdate=func.now())
+
+    business = relationship("Business", backref="invoices")
+
+
+# ── E-Commerce / Product Hunting Module ───────────────────────────────────────
+
+class EcomProduct(Base):
+    __tablename__ = "ecom_products"
+
+    id                     = Column(Integer, primary_key=True, index=True)
+    business_id            = Column(Integer, ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True, index=True)
+    product_name           = Column(String(300), nullable=False)
+    category               = Column(String(120), nullable=False)
+    marketplace            = Column(String(120), default="Amazon")
+    demand_score           = Column(Integer, default=0)
+    competition_score      = Column(Integer, default=0)
+    profit_score           = Column(Integer, default=0)
+    supplier_score         = Column(Integer, default=0)
+    trend_score            = Column(Integer, default=0)
+    risk_score             = Column(Integer, default=0)
+    ai_score               = Column(Integer, default=0)
+    ai_recommendation      = Column(Text, nullable=True)
+    supplier_name          = Column(String(200), nullable=True)
+    supplier_country       = Column(String(100), nullable=True)
+    supplier_cost          = Column(Float, default=0.0)
+    selling_price          = Column(Float, default=0.0)
+    estimated_profit       = Column(Float, default=0.0)
+    estimated_monthly_sales = Column(Integer, default=0)
+    status                 = Column(String(40), default="research")  # research|approved|rejected|listed
+    notes                  = Column(Text, nullable=True)
+    created_at             = Column(DateTime(timezone=True), server_default=func.now())
+
+    suppliers = relationship("EcomSupplier", back_populates="product", cascade="all, delete-orphan")
+    listings  = relationship("EcomListing", back_populates="product", cascade="all, delete-orphan")
+
+
+class EcomSupplier(Base):
+    __tablename__ = "ecom_suppliers"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    product_id    = Column(Integer, ForeignKey("ecom_products.id", ondelete="CASCADE"), nullable=False, index=True)
+    supplier_name = Column(String(200), nullable=False)
+    country       = Column(String(100), nullable=True)
+    cost_per_unit = Column(Float, default=0.0)
+    moq           = Column(Integer, default=1)
+    shipping_days = Column(Integer, default=7)
+    rating        = Column(Float, default=4.5)
+    shipping_type = Column(String(80), default="standard")
+    notes         = Column(Text, nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    product = relationship("EcomProduct", back_populates="suppliers")
+
+
+class EcomListing(Base):
+    __tablename__ = "ecom_listings"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    business_id  = Column(Integer, ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True, index=True)
+    product_id   = Column(Integer, ForeignKey("ecom_products.id", ondelete="SET NULL"), nullable=True)
+    marketplace  = Column(String(120), nullable=False)
+    title        = Column(String(500), nullable=True)
+    bullets      = Column(Text, nullable=True)
+    description  = Column(Text, nullable=True)
+    keywords     = Column(Text, nullable=True)
+    ad_headline  = Column(String(300), nullable=True)
+    status       = Column(String(40), default="draft")  # draft|pending_approval|approved|published
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+
+    product = relationship("EcomProduct", back_populates="listings")
+
+
+class DropshipDirectory(Base):
+    """Pre-seeded database of vetted dropship/wholesale companies."""
+    __tablename__ = "dropship_directory"
+
+    id                        = Column(Integer, primary_key=True, index=True)
+    name                      = Column(String(200), nullable=False, index=True)
+    country                   = Column(String(100), nullable=False)
+    region                    = Column(String(80), nullable=False)        # USA | EU | Asia | India | LatAm | Global
+    platform_type             = Column(String(80), nullable=False)        # wholesaler | distributor | dropshipper | POD | aggregator
+    categories                = Column(Text, nullable=True)               # JSON array string
+    website                   = Column(String(300), nullable=True)
+    min_order_usd             = Column(Float, default=0.0)
+    shipping_days_usa         = Column(Integer, default=7)
+    shipping_days_intl        = Column(Integer, default=21)
+    has_usa_warehouse         = Column(Boolean, default=False)
+    dropship_ready            = Column(Boolean, default=True)
+    api_integration           = Column(Boolean, default=False)
+    description               = Column(Text, nullable=True)
+    rating                    = Column(Float, default=4.0)
+    is_active                 = Column(Boolean, default=True)
+    created_at                = Column(DateTime(timezone=True), server_default=func.now())

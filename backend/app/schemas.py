@@ -1246,3 +1246,270 @@ class SmartBossInsightOut(BaseModel):
 class SmartBossQueryRequest(BaseModel):
     question:    str
     business_id: Optional[int] = None
+
+
+# ─── Invoice Schemas ────────────────────────────────────────────────────────────
+
+class InvoiceItem(BaseModel):
+    description: str
+    quantity:    float = 1.0
+    unit_price:  float = 0.0
+    total:       float = 0.0
+
+
+class InvoiceCreate(BaseModel):
+    business_id:    int
+    client_name:    str
+    client_email:   Optional[str] = None
+    client_phone:   Optional[str] = None
+    client_address: Optional[str] = None
+    due_date:       Optional[datetime] = None
+    items:          List[InvoiceItem] = []
+    tax_rate:       float = 0.0
+    notes:          Optional[str] = None
+
+
+class InvoiceUpdate(BaseModel):
+    status:   Optional[str] = None
+    notes:    Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class InvoiceOut(BaseModel):
+    id:             int
+    business_id:    int
+    invoice_number: str
+    client_name:    str
+    client_email:   Optional[str]
+    client_phone:   Optional[str]
+    client_address: Optional[str]
+    due_date:       Optional[datetime]
+    items:          Optional[str]
+    subtotal:       float
+    tax_rate:       float
+    tax_amount:     float
+    total:          float
+    status:         str
+    notes:          Optional[str]
+    created_at:     datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── AI Content Generation Schemas ─────────────────────────────────────────────
+
+class ContentRequest(BaseModel):
+    content_type:    str
+    topic:           str
+    brand_voice:     str = "professional"
+    target_audience: str = ""
+    keywords:        str = ""
+
+
+class ContentResponse(BaseModel):
+    content:  str
+    hashtags: List[str] = []
+    subject:  Optional[str] = None
+
+
+# ─── AI Website Builder Schemas ─────────────────────────────────────────────────
+
+class WebsiteRequest(BaseModel):
+    business_name: str
+    industry:      str
+    tagline:       str = ""
+    description:   str = ""
+    services:      str = ""
+    phone:         str = ""
+    email:         str = ""
+    address:       str = ""
+    color_theme:   str = "blue"
+    style:         str = "modern"
+
+
+class WebsiteResponse(BaseModel):
+    html: str
+
+
+# ── E-Commerce / Product Hunting Schemas ──────────────────────────────────────
+
+class ProductHuntRequest(BaseModel):
+    category:      str
+    marketplace:   str = "Amazon"
+    keywords:      str = ""
+    budget:        float = 50.0
+    business_type: str = "retail"
+
+class ProductHuntResult(BaseModel):
+    product_name:            str
+    category:                str
+    marketplace:             str
+    demand_score:            int
+    competition_score:       int
+    profit_score:            int
+    supplier_score:          int
+    trend_score:             int
+    risk_score:              int
+    ai_score:                int
+    ai_recommendation:       str
+    supplier_name:           str
+    supplier_country:        str
+    supplier_cost:           float
+    selling_price:           float
+    estimated_profit:        float
+    estimated_monthly_sales: int
+
+class ProductHuntResponse(BaseModel):
+    products: List[ProductHuntResult]
+    summary:  str
+
+class EcomProductCreate(BaseModel):
+    business_id:             Optional[int] = None
+    product_name:            str
+    category:                str
+    marketplace:             str = "Amazon"
+    demand_score:            int = 0
+    competition_score:       int = 0
+    profit_score:            int = 0
+    supplier_score:          int = 0
+    trend_score:             int = 0
+    risk_score:              int = 0
+    ai_score:                int = 0
+    ai_recommendation:       Optional[str] = None
+    supplier_name:           Optional[str] = None
+    supplier_country:        Optional[str] = None
+    supplier_cost:           float = 0.0
+    selling_price:           float = 0.0
+    estimated_profit:        float = 0.0
+    estimated_monthly_sales: int = 0
+    notes:                   Optional[str] = None
+
+class EcomProductOut(BaseModel):
+    id:                      int
+    business_id:             Optional[int]
+    product_name:            str
+    category:                str
+    marketplace:             str
+    demand_score:            int
+    competition_score:       int
+    profit_score:            int
+    supplier_score:          int
+    trend_score:             int
+    risk_score:              int
+    ai_score:                int
+    ai_recommendation:       Optional[str]
+    supplier_name:           Optional[str]
+    supplier_country:        Optional[str]
+    supplier_cost:           float
+    selling_price:           float
+    estimated_profit:        float
+    estimated_monthly_sales: int
+    status:                  str
+    notes:                   Optional[str]
+    created_at:              datetime
+    model_config = {"from_attributes": True}
+
+class EcomProductUpdate(BaseModel):
+    status: Optional[str] = None
+    notes:  Optional[str] = None
+
+class EcomSupplierCreate(BaseModel):
+    product_id:    int
+    supplier_name: str
+    country:       Optional[str] = None
+    cost_per_unit: float = 0.0
+    moq:           int = 1
+    shipping_days: int = 7
+    rating:        float = 4.5
+    shipping_type: str = "standard"
+    notes:         Optional[str] = None
+
+class EcomSupplierOut(BaseModel):
+    id:            int
+    product_id:    int
+    supplier_name: str
+    country:       Optional[str]
+    cost_per_unit: float
+    moq:           int
+    shipping_days: int
+    rating:        float
+    shipping_type: str
+    notes:         Optional[str]
+    created_at:    datetime
+    model_config = {"from_attributes": True}
+
+class ListingBuildRequest(BaseModel):
+    marketplace:     str
+    product_name:    str
+    features:        str
+    target_audience: str = "general consumers"
+    keywords:        str = ""
+    brand_voice:     str = "professional"
+
+class ListingBuildResponse(BaseModel):
+    title:       str
+    bullets:     str
+    description: str
+    keywords:    str
+    ad_headline: str
+
+class EcomListingCreate(BaseModel):
+    business_id: Optional[int] = None
+    product_id:  Optional[int] = None
+    marketplace: str
+    title:       Optional[str] = None
+    bullets:     Optional[str] = None
+    description: Optional[str] = None
+    keywords:    Optional[str] = None
+    ad_headline: Optional[str] = None
+
+class EcomListingOut(BaseModel):
+    id:          int
+    business_id: Optional[int]
+    product_id:  Optional[int]
+    marketplace: str
+    title:       Optional[str]
+    bullets:     Optional[str]
+    description: Optional[str]
+    keywords:    Optional[str]
+    ad_headline: Optional[str]
+    status:      str
+    created_at:  datetime
+    model_config = {"from_attributes": True}
+
+class ProfitCalcRequest(BaseModel):
+    selling_price:     float
+    product_cost:      float
+    marketplace_fee:   float = 0.0
+    shipping_cost:     float = 0.0
+    packaging_cost:    float = 0.0
+    advertising_cost:  float = 0.0
+    return_allowance:  float = 0.0
+    other_costs:       float = 0.0
+
+class ProfitCalcResponse(BaseModel):
+    selling_price:  float
+    total_cost:     float
+    net_profit:     float
+    roi_percent:    float
+    margin_percent: float
+    break_even:     float
+
+
+class DropshipDirectoryOut(BaseModel):
+    id:                 int
+    name:               str
+    country:            str
+    region:             str
+    platform_type:      str
+    categories:         Optional[str]
+    website:            Optional[str]
+    min_order_usd:      float
+    shipping_days_usa:  int
+    shipping_days_intl: int
+    has_usa_warehouse:  bool
+    dropship_ready:     bool
+    api_integration:    bool
+    description:        Optional[str]
+    rating:             float
+    model_config = {"from_attributes": True}

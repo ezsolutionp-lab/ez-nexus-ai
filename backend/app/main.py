@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 
 from .database import engine, get_db, SessionLocal
 from . import models, schemas
-from .ai_agent import analyze_transcript
+from .ai_agent import analyze_transcript, generate_content, build_website_html, hunt_products, build_listing
 from .notifications import hub
 from .config import settings
 from .auth import router as auth_router, seed_admin, get_current_user, get_admin_user
@@ -54,6 +54,13 @@ models.Base.metadata.create_all(bind=engine)
 # Seed default admin on startup
 with SessionLocal() as _seed_db:
     seed_admin(_seed_db)
+
+# Seed dropship directory on first run
+with SessionLocal() as _seed_db:
+    from .dropship_seed import seed_dropship_directory
+    _n = seed_dropship_directory(_seed_db)
+    if _n:
+        logger.info("Seeded %d dropship directory entries", _n)
 
 app = FastAPI(
     title="EZ-NEXUS AI Platform",
@@ -249,6 +256,303 @@ async def summarize_call(payload: schemas.CallSummaryRequest, db: Session = Depe
             await hub.notify_ai_summary(payload.appointment_id, result["summary"], result["triage"])
 
     return schemas.CallSummaryResponse(**result)
+
+
+# ── AI Content Generation ────────────────────────────────────────────────────
+
+@app.post("/ai/generate-content", response_model=schemas.ContentResponse, tags=["ai"])
+def ai_generate_content(payload: schemas.ContentRequest):
+    result = generate_content(
+        content_type=payload.content_type,
+        topic=payload.topic,
+        brand_voice=payload.brand_voice,
+        target_audience=payload.target_audience,
+        keywords=payload.keywords,
+    )
+    return schemas.ContentResponse(**result)
+
+
+# ── AI Website Builder ────────────────────────────────────────────────────────
+
+@app.post("/ai/build-website", response_model=schemas.WebsiteResponse, tags=["ai"])
+def ai_build_website(payload: schemas.WebsiteRequest):
+    html = build_website_html(
+        business_name=payload.business_name,
+        industry=payload.industry,
+        tagline=payload.tagline,
+        description=payload.description,
+        services=payload.services,
+        phone=payload.phone,
+        email=payload.email,
+        address=payload.address,
+        color_theme=payload.color_theme,
+    )
+    return schemas.WebsiteResponse(html=html)
+
+
+# ── Invoice Endpoints ────────────────────────────────────────────────────────
+
+@app.post("/invoices", response_model=schemas.InvoiceOut, status_code=201, tags=["invoices"])
+def create_invoice(payload: schemas.InvoiceCreate, db: Session = Depends(get_db)):
+    import json as _json
+    count = db.query(models.Invoice).count() + 1
+    invoice_number = f"INV-{datetime.utcnow().year}-{count:04d}"
+    items = payload.items or []
+    subtotal   = sum(it.quantity * it.unit_price for it in items)
+    tax_amount = subtotal * (payload.tax_rate / 100)
+    total      = subtotal + tax_amount
+    inv = models.Invoice(
+        business_id    = payload.business_id,
+        invoice_number = invoice_number,
+        client_name    = payload.client_name,
+        client_email   = payload.client_email,
+        client_phone   = payload.client_phone,
+        client_address = payload.client_address,
+        due_date       = payload.due_date,
+        items          = _json.dumps([it.model_dump() for it in items]),
+        subtotal       = subtotal,
+        tax_rate       = payload.tax_rate,
+        tax_amount     = tax_amount,
+        total          = total,
+        notes          = payload.notes,
+    )
+    db.add(inv); db.commit(); db.refresh(inv)
+    return inv
+
+
+@app.get("/invoices", response_model=List[schemas.InvoiceOut], tags=["invoices"])
+def list_invoices(
+    business_id: Optional[int] = None,
+    status:      Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.Invoice)
+    if business_id:
+        q = q.filter(models.Invoice.business_id == business_id)
+    if status:
+        q = q.filter(models.Invoice.status == status)
+    return q.order_by(models.Invoice.created_at.desc()).all()
+
+
+@app.put("/invoices/{invoice_id}", response_model=schemas.InvoiceOut, tags=["invoices"])
+def update_invoice(invoice_id: int, payload: schemas.InvoiceUpdate, db: Session = Depends(get_db)):
+    inv = db.get(models.Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(inv, field, value)
+    db.commit(); db.refresh(inv)
+    return inv
+
+
+@app.delete("/invoices/{invoice_id}", tags=["invoices"])
+def delete_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    inv = db.get(models.Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    db.delete(inv); db.commit()
+    return {"detail": f"Invoice {invoice_id} deleted."}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E-COMMERCE / PRODUCT HUNTING MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/ecom/hunt", response_model=schemas.ProductHuntResponse, tags=["ecommerce"])
+def ecom_hunt_products(payload: schemas.ProductHuntRequest):
+    """AI hunts for winning product opportunities in the specified category."""
+    result = hunt_products(
+        category=payload.category,
+        marketplace=payload.marketplace,
+        keywords=payload.keywords,
+        budget=payload.budget,
+    )
+    return schemas.ProductHuntResponse(**result)
+
+
+@app.post("/ecom/products", response_model=schemas.EcomProductOut, status_code=201, tags=["ecommerce"])
+def create_ecom_product(payload: schemas.EcomProductCreate, db: Session = Depends(get_db)):
+    product = models.EcomProduct(**payload.model_dump())
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@app.get("/ecom/products", response_model=List[schemas.EcomProductOut], tags=["ecommerce"])
+def list_ecom_products(
+    business_id: Optional[int] = None,
+    status:      Optional[str] = None,
+    marketplace: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EcomProduct)
+    if business_id:
+        q = q.filter(models.EcomProduct.business_id == business_id)
+    if status:
+        q = q.filter(models.EcomProduct.status == status)
+    if marketplace:
+        q = q.filter(models.EcomProduct.marketplace == marketplace)
+    return q.order_by(models.EcomProduct.ai_score.desc()).offset(skip).limit(limit).all()
+
+
+@app.put("/ecom/products/{product_id}", response_model=schemas.EcomProductOut, tags=["ecommerce"])
+def update_ecom_product(product_id: int, payload: schemas.EcomProductUpdate, db: Session = Depends(get_db)):
+    p = db.get(models.EcomProduct, product_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(p, k, v)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@app.delete("/ecom/products/{product_id}", tags=["ecommerce"])
+def delete_ecom_product(product_id: int, db: Session = Depends(get_db)):
+    p = db.get(models.EcomProduct, product_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    db.delete(p)
+    db.commit()
+    return {"detail": f"Product {product_id} deleted."}
+
+
+@app.post("/ecom/suppliers", response_model=schemas.EcomSupplierOut, status_code=201, tags=["ecommerce"])
+def create_ecom_supplier(payload: schemas.EcomSupplierCreate, db: Session = Depends(get_db)):
+    s = models.EcomSupplier(**payload.model_dump())
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+@app.get("/ecom/suppliers", response_model=List[schemas.EcomSupplierOut], tags=["ecommerce"])
+def list_ecom_suppliers(product_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.EcomSupplier)
+    if product_id:
+        q = q.filter(models.EcomSupplier.product_id == product_id)
+    return q.order_by(models.EcomSupplier.rating.desc()).all()
+
+
+@app.post("/ecom/listings/build", response_model=schemas.ListingBuildResponse, tags=["ecommerce"])
+def ecom_build_listing(payload: schemas.ListingBuildRequest):
+    result = build_listing(
+        marketplace=payload.marketplace,
+        product_name=payload.product_name,
+        features=payload.features,
+        target_audience=payload.target_audience,
+        keywords=payload.keywords,
+        brand_voice=payload.brand_voice,
+    )
+    return schemas.ListingBuildResponse(**result)
+
+
+@app.post("/ecom/listings", response_model=schemas.EcomListingOut, status_code=201, tags=["ecommerce"])
+def create_ecom_listing(payload: schemas.EcomListingCreate, db: Session = Depends(get_db)):
+    listing = models.EcomListing(**payload.model_dump())
+    db.add(listing)
+    db.commit()
+    db.refresh(listing)
+    return listing
+
+
+@app.get("/ecom/listings", response_model=List[schemas.EcomListingOut], tags=["ecommerce"])
+def list_ecom_listings(
+    business_id: Optional[int] = None,
+    status:      Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.EcomListing)
+    if business_id:
+        q = q.filter(models.EcomListing.business_id == business_id)
+    if status:
+        q = q.filter(models.EcomListing.status == status)
+    return q.order_by(models.EcomListing.created_at.desc()).all()
+
+
+@app.put("/ecom/listings/{listing_id}", tags=["ecommerce"])
+def update_ecom_listing_status(listing_id: int, status: str, db: Session = Depends(get_db)):
+    listing = db.get(models.EcomListing, listing_id)
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found.")
+    listing.status = status
+    db.commit()
+    return {"detail": "Updated.", "status": status}
+
+
+@app.post("/ecom/profit-calc", response_model=schemas.ProfitCalcResponse, tags=["ecommerce"])
+def ecom_profit_calc(payload: schemas.ProfitCalcRequest):
+    total_cost = (
+        payload.product_cost + payload.marketplace_fee + payload.shipping_cost +
+        payload.packaging_cost + payload.advertising_cost + payload.return_allowance + payload.other_costs
+    )
+    net_profit = payload.selling_price - total_cost
+    roi = (net_profit / payload.product_cost * 100) if payload.product_cost > 0 else 0.0
+    margin = (net_profit / payload.selling_price * 100) if payload.selling_price > 0 else 0.0
+    break_even = total_cost
+    return schemas.ProfitCalcResponse(
+        selling_price=round(payload.selling_price, 2),
+        total_cost=round(total_cost, 2),
+        net_profit=round(net_profit, 2),
+        roi_percent=round(roi, 1),
+        margin_percent=round(margin, 1),
+        break_even=round(break_even, 2),
+    )
+
+
+@app.get("/ecom/dropship-directory", response_model=List[schemas.DropshipDirectoryOut], tags=["ecommerce"])
+def list_dropship_directory(
+    region:        Optional[str] = None,
+    platform_type: Optional[str] = None,
+    has_usa_warehouse: Optional[bool] = None,
+    dropship_ready:    Optional[bool] = None,
+    search:        Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    """Browse the pre-seeded dropship/wholesale supplier directory."""
+    q = db.query(models.DropshipDirectory).filter(models.DropshipDirectory.is_active == True)
+    if region:
+        q = q.filter(models.DropshipDirectory.region.ilike(region))
+    if platform_type:
+        q = q.filter(models.DropshipDirectory.platform_type.ilike(platform_type))
+    if has_usa_warehouse is not None:
+        q = q.filter(models.DropshipDirectory.has_usa_warehouse == has_usa_warehouse)
+    if dropship_ready is not None:
+        q = q.filter(models.DropshipDirectory.dropship_ready == dropship_ready)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            models.DropshipDirectory.name.ilike(like) |
+            models.DropshipDirectory.categories.ilike(like) |
+            models.DropshipDirectory.description.ilike(like)
+        )
+    return q.order_by(models.DropshipDirectory.rating.desc()).offset(skip).limit(limit).all()
+
+
+@app.get("/ecom/dropship-directory/{supplier_id}", response_model=schemas.DropshipDirectoryOut, tags=["ecommerce"])
+def get_dropship_supplier(supplier_id: int, db: Session = Depends(get_db)):
+    s = db.get(models.DropshipDirectory, supplier_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Supplier not found.")
+    return s
+
+
+@app.get("/ecom/stats", tags=["ecommerce"])
+def ecom_stats(db: Session = Depends(get_db)):
+    from sqlalchemy import func as sqlfunc
+    return {
+        "total_products":  db.query(models.EcomProduct).count(),
+        "approved":        db.query(models.EcomProduct).filter(models.EcomProduct.status == "approved").count(),
+        "listed":          db.query(models.EcomProduct).filter(models.EcomProduct.status == "listed").count(),
+        "total_listings":  db.query(models.EcomListing).count(),
+        "total_suppliers": db.query(models.EcomSupplier).count(),
+        "avg_ai_score":    round(float(db.query(sqlfunc.avg(models.EcomProduct.ai_score)).scalar() or 0), 1),
+    }
 
 
 # ── Stats / Dashboard ────────────────────────────────────────────────────────

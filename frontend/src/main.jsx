@@ -3296,6 +3296,1175 @@ function CommanderTab() {
   )
 }
 
+// ── Website Builder Tab ──────────────────────────────────────────────────────
+const WB_THEMES = [
+  { id: 'blue',   name: 'Corporate', swatch: '#1B4FD8' },
+  { id: 'teal',   name: 'Fresh',     swatch: '#0F766E' },
+  { id: 'purple', name: 'Creative',  swatch: '#7C3AED' },
+  { id: 'dark',   name: 'Executive', swatch: '#1e293b' },
+]
+
+function WebsiteBuilderTab() {
+  const [step, setStep]           = useState('form')
+  const [form, setForm]           = useState({ business_name:'', industry:'', tagline:'', description:'', services:'', phone:'', email:'', address:'', color_theme:'blue' })
+  const [loading, setLoading]     = useState(false)
+  const [websiteHtml, setWebsite] = useState('')
+  const [error, setError]         = useState('')
+
+  const generate = async (e) => {
+    e.preventDefault(); setLoading(true); setError('')
+    try {
+      const res = await apiFetch('/ai/build-website', { method: 'POST', body: JSON.stringify(form) })
+      setWebsite(res.html); setStep('preview')
+    } catch (e) { setError(e.message) }
+    setLoading(false)
+  }
+
+  const download = () => {
+    const blob = new Blob([websiteHtml], { type: 'text/html' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = `${form.business_name.replace(/\s/g,'_') || 'website'}.html`
+    document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove()
+  }
+
+  return (
+    <div>
+      <div className="wb-hero">
+        <div className="wb-hero-title">🖥️ AI Website Builder</div>
+        <div className="wb-hero-sub">Generate a complete professional website for any business in seconds — powered by Commander AI</div>
+      </div>
+      <Alert msg={error} type="error" />
+
+      {step === 'form' && (
+        <div className="card">
+          <div className="card-header"><span className="card-title">Business Details</span></div>
+          <form onSubmit={generate}>
+            <div className="wb-form-grid" style={{ marginBottom: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Business Name *</label>
+                <input className="form-input" required placeholder="e.g. Dr. Ahmed Family Clinic" value={form.business_name} onChange={e => setForm(f=>({...f,business_name:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Industry *</label>
+                <input className="form-input" required placeholder="e.g. Healthcare, Dental, Retail" value={form.industry} onChange={e => setForm(f=>({...f,industry:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Tagline</label>
+                <input className="form-input" placeholder="e.g. Caring for your family since 2005" value={form.tagline} onChange={e => setForm(f=>({...f,tagline:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Phone</label>
+                <input className="form-input" placeholder="+1 555 000 0000" value={form.phone} onChange={e => setForm(f=>({...f,phone:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Email</label>
+                <input className="form-input" type="email" placeholder="info@business.com" value={form.email} onChange={e => setForm(f=>({...f,email:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Address</label>
+                <input className="form-input" placeholder="123 Main St, City, State" value={form.address} onChange={e => setForm(f=>({...f,address:e.target.value}))} />
+              </div>
+              <div className="form-group" style={{ gridColumn:'1/-1' }}>
+                <label className="form-label">Services (comma-separated)</label>
+                <input className="form-input" placeholder="e.g. General Check-ups, Vaccinations, Lab Tests" value={form.services} onChange={e => setForm(f=>({...f,services:e.target.value}))} />
+              </div>
+              <div className="form-group" style={{ gridColumn:'1/-1' }}>
+                <label className="form-label">About / Description</label>
+                <textarea className="form-textarea" style={{ minHeight:70 }} placeholder="What makes your business special?" value={form.description} onChange={e => setForm(f=>({...f,description:e.target.value}))} />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 20 }}>
+              <label className="form-label">Color Theme</label>
+              <div className="wb-theme-grid">
+                {WB_THEMES.map(th => (
+                  <button key={th.id} type="button" className={`wb-theme-btn ${form.color_theme===th.id?'active':''}`} onClick={() => setForm(f=>({...f,color_theme:th.id}))}>
+                    <div className="wb-theme-swatch" style={{ background: th.swatch }} />
+                    {th.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button className="btn btn-primary" type="submit" disabled={loading} style={{ width:'100%', fontSize:'1rem', padding:'12px' }}>
+              {loading ? '🧠 Commander AI is building your website…' : '🚀 Generate Website'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {step === 'preview' && (
+        <div>
+          <div style={{ display:'flex', gap:10, marginBottom:16, justifyContent:'space-between', flexWrap:'wrap' }}>
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn btn-primary" onClick={download}>⬇ Download HTML</button>
+              <button className="btn btn-outline" onClick={() => setStep('form')}>✏ Edit Details</button>
+            </div>
+            <div style={{ fontSize:'.82rem', color:'var(--gray-400)', alignSelf:'center' }}>✅ Download and host anywhere — works on any web host</div>
+          </div>
+          <div className="wb-preview-bar">
+            <div className="wb-dot" style={{ background:'#ef4444' }} />
+            <div className="wb-dot" style={{ background:'#f59e0b' }} />
+            <div className="wb-dot" style={{ background:'#22c55e' }} />
+            <div style={{ flex:1, background:'#334155', borderRadius:4, padding:'3px 12px', color:'#94a3b8', fontSize:'.75rem' }}>
+              {form.business_name || 'My Business'} — AI Generated Website Preview
+            </div>
+          </div>
+          <iframe className="wb-preview-iframe" srcDoc={websiteHtml} title="Website Preview" sandbox="allow-scripts" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Content Studio Tab ─────────────────────────────────────────────────────
+const CS_TYPES = [
+  { id:'instagram_post', icon:'📸', label:'Instagram Post',  desc:'Caption + hashtags' },
+  { id:'facebook_post',  icon:'👍', label:'Facebook Post',    desc:'Engaging post' },
+  { id:'linkedin_post',  icon:'💼', label:'LinkedIn Post',    desc:'Professional update' },
+  { id:'blog_article',   icon:'📝', label:'Blog Article',     desc:'SEO-ready content' },
+  { id:'email_campaign', icon:'📧', label:'Email Campaign',   desc:'Subject + body' },
+  { id:'video_script',   icon:'🎬', label:'Video Script',     desc:'Hook + content + CTA' },
+]
+const CS_VOICES = ['professional','friendly','urgent','inspiring','humorous','educational']
+
+function ContentStudioTab() {
+  const [contentType, setType] = useState('instagram_post')
+  const [form, setForm]        = useState({ topic:'', brand_voice:'professional', target_audience:'', keywords:'' })
+  const [loading, setLoading]  = useState(false)
+  const [result, setResult]    = useState(null)
+  const [error, setError]      = useState('')
+  const [copied, setCopied]    = useState(false)
+  const [history, setHistory]  = useState([])
+
+  const generate = async (e) => {
+    e.preventDefault(); setLoading(true); setError(''); setResult(null)
+    try {
+      const res = await apiFetch('/ai/generate-content', { method:'POST', body: JSON.stringify({ content_type: contentType, ...form }) })
+      setResult(res)
+      setHistory(prev => [{ contentType, topic: form.topic, content: res.content, ts: new Date().toISOString() }, ...prev.slice(0,9)])
+    } catch (e) { setError(e.message) }
+    setLoading(false)
+  }
+
+  const copy = () => {
+    if (!result?.content) return
+    const text = result.content + (result.hashtags?.length ? '\n\n' + result.hashtags.join(' ') : '')
+    navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000)
+  }
+
+  const curType = CS_TYPES.find(t => t.id === contentType)
+
+  return (
+    <div>
+      <div className="cs-hero">
+        <div style={{ fontSize:'1.8rem', fontWeight:800, marginBottom:6 }}>🎬 Content Studio</div>
+        <div style={{ color:'rgba(255,255,255,.7)', fontSize:'.9rem' }}>AI-powered content for every platform — posts, blogs, emails, scripts, and more</div>
+      </div>
+      <Alert msg={error} type="error" />
+
+      <div className="card">
+        <div className="card-header"><span className="card-title">Choose Content Type</span></div>
+        <div className="cs-type-grid">
+          {CS_TYPES.map(t => (
+            <button key={t.id} type="button" className={`cs-type-btn ${contentType===t.id?'active':''}`} onClick={() => setType(t.id)}>
+              <span className="cs-type-icon">{t.icon}</span>
+              <span className="cs-type-label">{t.label}</span>
+              <span className="cs-type-desc">{t.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, alignItems:'flex-start' }}>
+        <div className="card">
+          <div className="card-header"><span className="card-title">Content Details</span></div>
+          <form onSubmit={generate} className="form">
+            <div className="form-group">
+              <label className="form-label">Topic / Subject *</label>
+              <input className="form-input" required placeholder="e.g. Summer sale 30% off, New product launch, Patient testimonial..." value={form.topic} onChange={e => setForm(f=>({...f,topic:e.target.value}))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Brand Voice</label>
+              <select className="form-select" value={form.brand_voice} onChange={e => setForm(f=>({...f,brand_voice:e.target.value}))}>
+                {CS_VOICES.map(v => <option key={v} value={v}>{v.charAt(0).toUpperCase()+v.slice(1)}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Target Audience</label>
+              <input className="form-input" placeholder="e.g. Small business owners, parents 25-45" value={form.target_audience} onChange={e => setForm(f=>({...f,target_audience:e.target.value}))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Keywords (comma-separated)</label>
+              <input className="form-input" placeholder="e.g. dental care, smile, family" value={form.keywords} onChange={e => setForm(f=>({...f,keywords:e.target.value}))} />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={loading}>
+              {loading ? `✨ Generating ${curType?.label}…` : `✨ Generate ${curType?.label}`}
+            </button>
+          </form>
+        </div>
+
+        <div>
+          {result ? (
+            <div className="cs-result-box">
+              <div className="cs-result-header">
+                <span className="cs-result-title">{curType?.icon} {curType?.label}</span>
+                <button className="btn btn-outline btn-sm" onClick={copy} style={{ color:'#60a5fa', borderColor:'#60a5fa' }}>
+                  {copied ? '✅ Copied!' : '📋 Copy All'}
+                </button>
+              </div>
+              <div className="cs-result-content">{result.content}</div>
+              {result.subject && (
+                <div style={{ marginTop:12, padding:'10px 12px', background:'rgba(27,79,216,.12)', borderRadius:6 }}>
+                  <span style={{ color:'#60a5fa', fontSize:'.78rem', fontWeight:700 }}>Subject Line: </span>
+                  <span style={{ color:'#e2e8f0', fontSize:'.85rem' }}>{result.subject}</span>
+                </div>
+              )}
+              {result.hashtags?.length > 0 && (
+                <div className="cs-hashtags">
+                  {result.hashtags.map((h,i) => <span key={i} className="cs-hashtag">{h}</span>)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card" style={{ textAlign:'center', padding:'48px 24px', color:'var(--gray-400)' }}>
+              <div style={{ fontSize:'3rem', marginBottom:12 }}>✨</div>
+              <p style={{ fontSize:'.9rem' }}>Fill in the details and click generate to create your content</p>
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div className="card" style={{ marginTop:14 }}>
+              <div className="card-header"><span className="card-title" style={{ fontSize:'.85rem' }}>Recent Generations</span></div>
+              {history.slice(0,4).map((h,i) => (
+                <div key={i} style={{ padding:'8px 0', borderBottom:'1px solid var(--gray-100)', cursor:'pointer' }} onClick={() => setResult({ content: h.content, hashtags:[], subject: null })}>
+                  <div style={{ fontSize:'.72rem', color:'var(--gray-400)' }}>{new Date(h.ts).toLocaleTimeString()}</div>
+                  <div style={{ fontSize:'.82rem', fontWeight:600, color:'var(--gray-900)' }}>{h.topic}</div>
+                  <div style={{ fontSize:'.78rem', color:'var(--gray-600)' }}>{h.content.slice(0,70)}…</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Invoices Tab ───────────────────────────────────────────────────────────
+const EMPTY_ITEM = { description:'', quantity:'1', unit_price:'' }
+
+function InvoicesTab() {
+  const [invoices, setInvoices]     = useState([])
+  const [businesses, setBusinesses] = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState('')
+  const [success, setSuccess]       = useState('')
+  const [showForm, setShowForm]     = useState(false)
+  const [viewInvoice, setView]      = useState(null)
+  const [form, setForm]             = useState({ business_id:'', client_name:'', client_email:'', client_phone:'', client_address:'', due_date:'', notes:'', tax_rate:'0' })
+  const [items, setItems]           = useState([{...EMPTY_ITEM}])
+
+  const subtotal = items.reduce((s,it) => s + parseFloat(it.quantity||0) * parseFloat(it.unit_price||0), 0)
+  const taxRate  = parseFloat(form.tax_rate||0) / 100
+  const taxAmt   = subtotal * taxRate
+  const total    = subtotal + taxAmt
+  const fmt$     = (n) => `$${(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',')}`
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [inv, biz] = await Promise.all([apiFetch('/invoices'), apiFetch('/businesses')])
+      setInvoices(inv); setBusinesses(biz)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const addItem    = () => setItems(p => [...p, {...EMPTY_ITEM}])
+  const removeItem = (i) => setItems(p => p.filter((_,idx) => idx !== i))
+  const updItem    = (i,f,v) => setItems(p => p.map((it,idx) => idx===i ? {...it,[f]:v} : it))
+
+  const handleSubmit = async (e) => {
+    e.preventDefault(); setError(''); setSuccess('')
+    try {
+      await apiFetch('/invoices', {
+        method:'POST',
+        body: JSON.stringify({
+          ...form,
+          business_id: parseInt(form.business_id),
+          tax_rate: parseFloat(form.tax_rate||0),
+          items: items.map(it => ({ description:it.description, quantity:parseFloat(it.quantity||1), unit_price:parseFloat(it.unit_price||0), total:parseFloat(it.quantity||1)*parseFloat(it.unit_price||0) }))
+        })
+      })
+      setSuccess('Invoice created!'); setShowForm(false)
+      setForm({ business_id:'', client_name:'', client_email:'', client_phone:'', client_address:'', due_date:'', notes:'', tax_rate:'0' })
+      setItems([{...EMPTY_ITEM}]); load()
+    } catch (e) { setError(e.message) }
+  }
+
+  const updateStatus  = async (id, status) => {
+    try { await apiFetch(`/invoices/${id}`, { method:'PUT', body: JSON.stringify({ status }) }); load() } catch (e) { setError(e.message) }
+  }
+  const deleteInvoice = async (id) => {
+    if (!confirm('Delete this invoice?')) return
+    try { await apiFetch(`/invoices/${id}`, { method:'DELETE' }); load() } catch (e) { setError(e.message) }
+  }
+
+  const totalInvoiced = invoices.reduce((s,inv) => s + (inv.total||0), 0)
+  const totalPaid     = invoices.filter(inv => inv.status==='paid').reduce((s,inv) => s + (inv.total||0), 0)
+  const totalPending  = invoices.filter(inv => inv.status==='sent').reduce((s,inv) => s + (inv.total||0), 0)
+  const totalOverdue  = invoices.filter(inv => inv.status==='overdue').length
+  const STATUS_BADGE  = { draft:'inv-badge-draft', sent:'inv-badge-sent', paid:'inv-badge-paid', overdue:'inv-badge-overdue' }
+
+  return (
+    <div>
+      <Alert msg={error} type="error" />
+      <Alert msg={success} type="success" />
+
+      {/* Stats */}
+      <div className="inv-stats">
+        {[
+          { label:'Total Invoiced', val: fmt$(totalInvoiced), color:'#1B4FD8' },
+          { label:'Paid',           val: fmt$(totalPaid),     color:'#22c55e' },
+          { label:'Pending',        val: fmt$(totalPending),  color:'#f59e0b' },
+          { label:'Overdue',        val: String(totalOverdue),color:'#ef4444' },
+        ].map((s,i) => (
+          <div key={i} className="inv-stat" style={{ borderColor: s.color }}>
+            <div className="inv-stat-label">{s.label}</div>
+            <div className="inv-stat-value" style={{ color: s.color }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Invoice List */}
+      {!showForm && !viewInvoice && (
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">📄 Invoices ({invoices.length})</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ New Invoice</button>
+          </div>
+          {loading ? <Spinner /> : invoices.length === 0 ? (
+            <div className="empty"><div className="empty-icon">📄</div><p>No invoices yet. Create your first one above.</p></div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>#</th><th>Client</th><th>Business</th><th>Issue Date</th><th>Due</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {invoices.map(inv => (
+                    <tr key={inv.id}>
+                      <td style={{ fontFamily:'monospace', fontWeight:700, color:'var(--blue)' }}>{inv.invoice_number}</td>
+                      <td>
+                        <strong>{inv.client_name}</strong>
+                        {inv.client_email && <div style={{ fontSize:'.75rem', color:'var(--gray-600)' }}>{inv.client_email}</div>}
+                      </td>
+                      <td style={{ fontSize:'.8rem' }}>{businesses.find(b=>b.id===inv.business_id)?.name || `#${inv.business_id}`}</td>
+                      <td style={{ fontSize:'.8rem' }}>{new Date(inv.created_at).toLocaleDateString()}</td>
+                      <td style={{ fontSize:'.8rem', color: inv.status==='overdue' ? '#ef4444' : 'inherit' }}>
+                        {inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '—'}
+                      </td>
+                      <td style={{ fontWeight:700, color:'var(--navy)' }}>{fmt$(inv.total)}</td>
+                      <td><span className={`badge ${STATUS_BADGE[inv.status]||'badge-scheduled'}`}>{inv.status}</span></td>
+                      <td>
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                          <button className="btn btn-outline btn-sm" onClick={() => setView(inv)}>View</button>
+                          {inv.status === 'draft' && <button className="btn btn-teal btn-sm" onClick={() => updateStatus(inv.id,'sent')}>Send</button>}
+                          {inv.status === 'sent'  && <button className="btn btn-sm" style={{ background:'#dcfce7', color:'#166534', border:'none' }} onClick={() => updateStatus(inv.id,'paid')}>✓ Paid</button>}
+                          <button className="btn btn-danger btn-sm" onClick={() => deleteInvoice(inv.id)}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create Form */}
+      {showForm && (
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Create New Invoice</span>
+            <button className="btn btn-outline btn-sm" onClick={() => setShowForm(false)}>✕ Cancel</button>
+          </div>
+          <form onSubmit={handleSubmit}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+              <div className="form-group">
+                <label className="form-label">Business *</label>
+                <select className="form-select" required value={form.business_id} onChange={e => setForm(f=>({...f,business_id:e.target.value}))}>
+                  <option value="">Select Business</option>
+                  {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Client Name *</label>
+                <input className="form-input" required value={form.client_name} onChange={e => setForm(f=>({...f,client_name:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Client Email</label>
+                <input className="form-input" type="email" value={form.client_email} onChange={e => setForm(f=>({...f,client_email:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Due Date</label>
+                <input className="form-input" type="date" value={form.due_date} onChange={e => setForm(f=>({...f,due_date:e.target.value}))} />
+              </div>
+              <div className="form-group" style={{ gridColumn:'1/-1' }}>
+                <label className="form-label">Client Address</label>
+                <input className="form-input" placeholder="Billing address" value={form.client_address} onChange={e => setForm(f=>({...f,client_address:e.target.value}))} />
+              </div>
+            </div>
+
+            {/* Line Items */}
+            <div style={{ marginBottom:16 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                <label className="form-label" style={{ margin:0 }}>Line Items *</label>
+                <button type="button" className="btn btn-outline btn-sm" onClick={addItem}>+ Add Item</button>
+              </div>
+              <table className="inv-items-table">
+                <thead><tr><th style={{ minWidth:200 }}>Description</th><th style={{ width:70 }}>Qty</th><th style={{ width:110 }}>Unit Price</th><th style={{ width:100 }}>Total</th><th style={{ width:40 }}></th></tr></thead>
+                <tbody>
+                  {items.map((it,i) => (
+                    <tr key={i}>
+                      <td><input className="form-input" placeholder="Service or product" value={it.description} onChange={e => updItem(i,'description',e.target.value)} required /></td>
+                      <td><input className="form-input" type="number" min="1" step="0.5" value={it.quantity} onChange={e => updItem(i,'quantity',e.target.value)} style={{ padding:'7px 8px' }} /></td>
+                      <td><input className="form-input" type="number" min="0" step="0.01" placeholder="0.00" value={it.unit_price} onChange={e => updItem(i,'unit_price',e.target.value)} style={{ padding:'7px 8px' }} /></td>
+                      <td style={{ fontWeight:700 }}>{fmt$(parseFloat(it.quantity||0)*parseFloat(it.unit_price||0))}</td>
+                      <td>{items.length > 1 && <button type="button" className="btn btn-danger btn-sm" onClick={() => removeItem(i)} style={{ padding:'4px 8px' }}>✕</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="inv-totals">
+                <div className="inv-total-row"><span>Subtotal</span><span>{fmt$(subtotal)}</span></div>
+                <div className="inv-total-row">
+                  <span>Tax&nbsp;
+                    <input type="number" min="0" max="100" step="0.5" value={form.tax_rate}
+                      onChange={e => setForm(f=>({...f,tax_rate:e.target.value}))}
+                      style={{ width:45, fontSize:'.8rem', padding:'2px 5px', border:'1px solid #e2e8f0', borderRadius:4 }} />%
+                  </span>
+                  <span>{fmt$(taxAmt)}</span>
+                </div>
+                <div className="inv-total-row grand"><span>Total</span><span>{fmt$(total)}</span></div>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom:16 }}>
+              <label className="form-label">Notes / Payment Terms</label>
+              <textarea className="form-textarea" style={{ minHeight:60 }} placeholder="e.g. Payment due within 30 days. Thank you for your business!" value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} />
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button className="btn btn-primary" type="submit">💾 Save Invoice</button>
+              <button className="btn btn-outline" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* View / Print Invoice */}
+      {viewInvoice && (() => {
+        let parsedItems = []
+        try { parsedItems = typeof viewInvoice.items === 'string' ? JSON.parse(viewInvoice.items) : (viewInvoice.items||[]) } catch {}
+        const biz = businesses.find(b => b.id === viewInvoice.business_id)
+        return (
+          <div className="card" id="inv-print">
+            <div className="card-header inv-actions">
+              <span className="card-title">Invoice {viewInvoice.invoice_number}</span>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn btn-primary btn-sm" onClick={() => window.print()}>🖨 Print / PDF</button>
+                <button className="btn btn-outline btn-sm" onClick={() => setView(null)}>← Back to Invoices</button>
+              </div>
+            </div>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:28, flexWrap:'wrap', gap:16 }}>
+              <div>
+                <div style={{ fontSize:'1.4rem', fontWeight:900, color:'var(--navy)' }}>{biz?.name || 'Business'}</div>
+                <div style={{ color:'var(--gray-600)', fontSize:'.85rem', marginTop:4, lineHeight:1.8 }}>
+                  {biz?.email && <div>{biz.email}</div>}{biz?.phone && <div>{biz.phone}</div>}{biz?.address && <div>{biz.address}</div>}
+                </div>
+              </div>
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:'2rem', fontWeight:900, color:'var(--blue)' }}>INVOICE</div>
+                <div style={{ fontFamily:'monospace', color:'var(--gray-600)' }}>{viewInvoice.invoice_number}</div>
+                <div style={{ marginTop:8 }}>
+                  <span className={`badge ${STATUS_BADGE[viewInvoice.status]||'badge-scheduled'}`} style={{ fontSize:'.85rem', padding:'5px 14px' }}>
+                    {viewInvoice.status.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:24, padding:'16px 0', borderTop:'1px solid var(--gray-200)', borderBottom:'1px solid var(--gray-200)' }}>
+              <div>
+                <div style={{ fontWeight:700, color:'var(--gray-600)', fontSize:'.75rem', marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>Bill To</div>
+                <div style={{ fontWeight:700 }}>{viewInvoice.client_name}</div>
+                <div style={{ color:'var(--gray-600)', fontSize:'.85rem', lineHeight:1.7 }}>
+                  {viewInvoice.client_email && <div>{viewInvoice.client_email}</div>}
+                  {viewInvoice.client_phone && <div>{viewInvoice.client_phone}</div>}
+                  {viewInvoice.client_address && <div>{viewInvoice.client_address}</div>}
+                </div>
+              </div>
+              <div style={{ textAlign:'right', fontSize:'.85rem', color:'var(--gray-600)' }}>
+                <div><strong>Issue Date:</strong> {new Date(viewInvoice.created_at).toLocaleDateString()}</div>
+                {viewInvoice.due_date && <div style={{ marginTop:4 }}><strong>Due Date:</strong> {new Date(viewInvoice.due_date).toLocaleDateString()}</div>}
+              </div>
+            </div>
+            <table className="inv-items-table">
+              <thead><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th style={{ textAlign:'right' }}>Total</th></tr></thead>
+              <tbody>
+                {parsedItems.map((it,i) => (
+                  <tr key={i}>
+                    <td>{it.description}</td>
+                    <td>{it.quantity}</td>
+                    <td>{fmt$(it.unit_price)}</td>
+                    <td style={{ textAlign:'right', fontWeight:600 }}>{fmt$(it.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="inv-totals">
+              <div className="inv-total-row"><span>Subtotal</span><span>{fmt$(viewInvoice.subtotal)}</span></div>
+              {viewInvoice.tax_rate > 0 && <div className="inv-total-row"><span>Tax ({viewInvoice.tax_rate}%)</span><span>{fmt$(viewInvoice.tax_amount)}</span></div>}
+              <div className="inv-total-row grand"><span>Total Due</span><span>{fmt$(viewInvoice.total)}</span></div>
+            </div>
+            {viewInvoice.notes && (
+              <div style={{ marginTop:20, padding:'12px 16px', background:'var(--blue-light)', borderRadius:6 }}>
+                <strong style={{ fontSize:'.8rem', color:'var(--blue)' }}>Notes:</strong>
+                <p style={{ fontSize:'.85rem', margin:'4px 0 0', color:'var(--gray-600)' }}>{viewInvoice.notes}</p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── E-Commerce / Product Hunting Tab ────────────────────────────────────────
+const ECOM_MARKETPLACES = ['Amazon','eBay','Shopify','Walmart','Etsy','TikTok Shop','Facebook Marketplace']
+const ECOM_CATEGORIES   = ['Home & Kitchen','Electronics','Pet Supplies','Beauty','Fitness','Kids','Outdoor','Office','Automotive']
+const SCORE_COLOR = s => s >= 80 ? '#10b981' : s >= 65 ? '#f59e0b' : '#ef4444'
+
+function ScoreBar({ label, value }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:'.75rem', color:'#94a3b8', marginBottom:2 }}>
+        <span>{label}</span><span style={{ color: SCORE_COLOR(value), fontWeight:700 }}>{value}</span>
+      </div>
+      <div style={{ background:'#1e293b', borderRadius:4, height:6 }}>
+        <div style={{ width:`${value}%`, height:'100%', borderRadius:4, background: SCORE_COLOR(value), transition:'width .4s' }} />
+      </div>
+    </div>
+  )
+}
+
+function EcommerceTab() {
+  const [panel, setPanel]             = React.useState('hunter')
+  const [huntForm, setHuntForm]       = React.useState({ category:'Home & Kitchen', marketplace:'Amazon', keywords:'', budget:'50' })
+  const [hunting, setHunting]         = React.useState(false)
+  const [huntResults, setHuntResults] = React.useState([])
+  const [huntSummary, setHuntSummary] = React.useState('')
+  const [products, setProducts]       = React.useState([])
+  const [listings, setListings]       = React.useState([])
+  const [ecomStats, setEcomStats]     = React.useState({})
+
+  // Dropship directory states
+  const [dsSuppliers, setDsSuppliers]   = React.useState([])
+  const DS_EMPTY = { region:'', platform_type:'', has_usa_warehouse:'', dropship_ready:'', search:'' }
+  const [dsFilter, setDsFilter]         = React.useState(DS_EMPTY)
+  const [dsLoading, setDsLoading]       = React.useState(false)
+  const [dsSelected, setDsSelected]     = React.useState(null)
+  const dsFilterRef                     = React.useRef(DS_EMPTY)
+
+  const [profitForm, setProfitForm]   = React.useState({
+    selling_price:'', product_cost:'', marketplace_fee:'', shipping_cost:'',
+    packaging_cost:'', advertising_cost:'', return_allowance:'', other_costs:''
+  })
+  const [profitResult, setProfitResult] = React.useState(null)
+
+  const [listForm, setListForm]   = React.useState({
+    marketplace:'Amazon', product_name:'', features:'', target_audience:'general consumers',
+    keywords:'', brand_voice:'professional'
+  })
+  const [listing, setListing]     = React.useState(null)
+  const [building, setBuilding]   = React.useState(false)
+  const [savingListing, setSaving] = React.useState(false)
+
+  const [error, setError]   = React.useState('')
+  const [success, setSuccess] = React.useState('')
+
+  const loadProducts = async () => {
+    try {
+      const r = await fetch(`${API}/ecom/products?limit=50`)
+      if (r.ok) setProducts(await r.json())
+    } catch {}
+  }
+  const loadListings = async () => {
+    try {
+      const r = await fetch(`${API}/ecom/listings?limit=50`)
+      if (r.ok) setListings(await r.json())
+    } catch {}
+  }
+  const loadStats = async () => {
+    try {
+      const r = await fetch(`${API}/ecom/stats`)
+      if (r.ok) setEcomStats(await r.json())
+    } catch {}
+  }
+
+  const loadDropship = async (filters) => {
+    const f = filters || dsFilterRef.current
+    setDsLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (f.region)            params.set('region', f.region)
+      if (f.platform_type)     params.set('platform_type', f.platform_type)
+      if (f.has_usa_warehouse) params.set('has_usa_warehouse', f.has_usa_warehouse)
+      if (f.dropship_ready)    params.set('dropship_ready', f.dropship_ready)
+      if (f.search)            params.set('search', f.search)
+      params.set('limit', '100')
+      const r = await fetch(`${API}/ecom/dropship-directory?${params}`)
+      if (r.ok) setDsSuppliers(await r.json())
+    } catch {}
+    setDsLoading(false)
+  }
+
+  const updateDsFilter = (key, val) => {
+    const f = { ...dsFilterRef.current, [key]: val }
+    dsFilterRef.current = f
+    setDsFilter(f)
+    loadDropship(f)
+  }
+
+  const clearDsFilters = () => {
+    dsFilterRef.current = DS_EMPTY
+    setDsFilter(DS_EMPTY)
+    loadDropship(DS_EMPTY)
+  }
+
+  React.useEffect(() => { loadProducts(); loadListings(); loadStats(); loadDropship(DS_EMPTY) }, [])
+
+  const doHunt = async () => {
+    setError(''); setSuccess(''); setHunting(true); setHuntResults([])
+    try {
+      const r = await fetch(`${API}/ecom/hunt`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ category: huntForm.category, marketplace: huntForm.marketplace, keywords: huntForm.keywords, budget: parseFloat(huntForm.budget)||50 })
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const d = await r.json()
+      setHuntResults(d.products || [])
+      setHuntSummary(d.summary || '')
+    } catch(e) { setError(e.message) }
+    setHunting(false)
+  }
+
+  const saveProduct = async (prod) => {
+    try {
+      const r = await fetch(`${API}/ecom/products`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(prod)
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setSuccess('Product saved to database!'); loadProducts(); loadStats()
+    } catch(e) { setError(e.message) }
+  }
+
+  const updateProductStatus = async (id, status) => {
+    try {
+      await fetch(`${API}/ecom/products/${id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ status })
+      })
+      loadProducts()
+    } catch {}
+  }
+
+  const deleteProduct = async (id) => {
+    try {
+      await fetch(`${API}/ecom/products/${id}`, { method:'DELETE' })
+      loadProducts(); loadStats()
+    } catch {}
+  }
+
+  const calcProfit = async () => {
+    setError('')
+    const p = {}
+    for (const k in profitForm) p[k] = parseFloat(profitForm[k])||0
+    try {
+      const r = await fetch(`${API}/ecom/profit-calc`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(p)
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setProfitResult(await r.json())
+    } catch(e) { setError(e.message) }
+  }
+
+  const doBuildListing = async () => {
+    setError(''); setBuilding(true); setListing(null)
+    try {
+      const r = await fetch(`${API}/ecom/listings/build`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(listForm)
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setListing(await r.json())
+    } catch(e) { setError(e.message) }
+    setBuilding(false)
+  }
+
+  const saveListing = async () => {
+    if (!listing) return
+    setSaving(true)
+    try {
+      const r = await fetch(`${API}/ecom/listings`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ marketplace: listForm.marketplace, title: listing.title, bullets: listing.bullets, description: listing.description, keywords: listing.keywords, ad_headline: listing.ad_headline })
+      })
+      if (!r.ok) throw new Error(await r.text())
+      setSuccess('Listing saved!'); loadListings(); loadStats()
+    } catch(e) { setError(e.message) }
+    setSaving(false)
+  }
+
+  const copyText = (txt) => { navigator.clipboard.writeText(txt).catch(()=>{}); setSuccess('Copied!'); setTimeout(()=>setSuccess(''),2000) }
+
+  const panels = [
+    { id:'hunter',    label:'🎯 Product Hunter' },
+    { id:'products',  label:'📦 My Products' },
+    { id:'profit',    label:'💰 Profit Calculator' },
+    { id:'listing',   label:'📝 Listing Builder' },
+    { id:'listings',  label:'🗂️ My Listings' },
+    { id:'dropship',  label:'🏭 Supplier Directory' },
+  ]
+
+  const STATUS_COLOR = { research:'#64748b', approved:'#10b981', rejected:'#ef4444', listed:'#3b82f6' }
+
+  return (
+    <div className="tab-content">
+      <div className="ecom-hero">
+        <div>
+          <h2 className="ecom-hero-title">🛒 EZ-NEXUS AI E-Commerce Hub</h2>
+          <p className="ecom-hero-sub">AI Product Hunting · Profit Calculator · Listing Builder · Multi-Marketplace</p>
+        </div>
+        <div className="ecom-stats-row">
+          <div className="ecom-stat-pill"><strong>{ecomStats.total_products||0}</strong><span>Products</span></div>
+          <div className="ecom-stat-pill"><strong>{ecomStats.approved||0}</strong><span>Approved</span></div>
+          <div className="ecom-stat-pill"><strong>{ecomStats.total_listings||0}</strong><span>Listings</span></div>
+          <div className="ecom-stat-pill"><strong>{ecomStats.avg_ai_score||0}</strong><span>Avg Score</span></div>
+        </div>
+      </div>
+
+      {error   && <div className="alert alert-danger"  style={{margin:'0 0 12px'}}>{error}</div>}
+      {success && <div className="alert alert-success" style={{margin:'0 0 12px'}}>{success}</div>}
+
+      <div className="ecom-panel-tabs">
+        {panels.map(p => (
+          <button key={p.id} className={`ecom-panel-btn ${panel===p.id?'active':''}`} onClick={()=>setPanel(p.id)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {panel === 'hunter' && (
+        <div>
+          <div className="card" style={{marginBottom:20}}>
+            <h3 style={{color:'#f1f5f9',marginBottom:16}}>AI Product Hunting Engine</h3>
+            <div className="ecom-hunt-grid">
+              <div>
+                <label className="form-label">Category</label>
+                <select className="form-control" value={huntForm.category} onChange={e=>setHuntForm(f=>({...f,category:e.target.value}))}>
+                  {ECOM_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Target Marketplace</label>
+                <select className="form-control" value={huntForm.marketplace} onChange={e=>setHuntForm(f=>({...f,marketplace:e.target.value}))}>
+                  {ECOM_MARKETPLACES.map(m=><option key={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Keywords (optional)</label>
+                <input className="form-control" placeholder="e.g. portable, LED, eco-friendly" value={huntForm.keywords} onChange={e=>setHuntForm(f=>({...f,keywords:e.target.value}))} />
+              </div>
+              <div>
+                <label className="form-label">Max Budget / Unit ($)</label>
+                <input className="form-control" type="number" placeholder="50" value={huntForm.budget} onChange={e=>setHuntForm(f=>({...f,budget:e.target.value}))} />
+              </div>
+            </div>
+            <button className="btn btn-primary" style={{marginTop:16}} onClick={doHunt} disabled={hunting}>
+              {hunting ? '🔍 AI Hunting Products...' : '🚀 Hunt Winning Products'}
+            </button>
+          </div>
+
+          {huntSummary && <div className="ecom-summary-bar">{huntSummary}</div>}
+
+          {huntResults.length > 0 && (
+            <div className="ecom-product-grid">
+              {huntResults.map((p,i) => (
+                <div className="ecom-product-card" key={i}>
+                  <div className="ecom-product-header">
+                    <div>
+                      <div className="ecom-product-name">{p.product_name}</div>
+                      <div className="ecom-product-meta">{p.marketplace} · {p.category}</div>
+                    </div>
+                    <div className="ecom-ai-score" style={{color: SCORE_COLOR(p.ai_score)}}>
+                      {p.ai_score}<span style={{fontSize:'.7rem',color:'#94a3b8'}}>/100</span>
+                    </div>
+                  </div>
+                  <div style={{padding:'0 16px 4px'}}>
+                    <ScoreBar label="Demand"      value={p.demand_score} />
+                    <ScoreBar label="Competition" value={p.competition_score} />
+                    <ScoreBar label="Profit"      value={p.profit_score} />
+                    <ScoreBar label="Supplier"    value={p.supplier_score} />
+                    <ScoreBar label="Trend"       value={p.trend_score} />
+                  </div>
+                  <div className="ecom-product-financials">
+                    <div><span>Cost</span><strong>${p.supplier_cost?.toFixed(2)}</strong></div>
+                    <div><span>Sell</span><strong>${p.selling_price?.toFixed(2)}</strong></div>
+                    <div><span>Profit</span><strong style={{color:'#10b981'}}>${p.estimated_profit?.toFixed(2)}</strong></div>
+                    <div><span>Units/Mo</span><strong>{p.estimated_monthly_sales}</strong></div>
+                  </div>
+                  <div className="ecom-supplier-tag">
+                    🏭 {p.supplier_name} ({p.supplier_country})
+                  </div>
+                  <div className="ecom-rec-text">{p.ai_recommendation}</div>
+                  <button className="btn btn-teal" style={{width:'100%',marginTop:10}} onClick={()=>saveProduct(p)}>
+                    + Save to My Products
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {panel === 'products' && (
+        <div>
+          <h3 style={{color:'#f1f5f9',marginBottom:16}}>My Product Database</h3>
+          {products.length === 0 ? (
+            <div className="card" style={{textAlign:'center',color:'#94a3b8',padding:'40px'}}>
+              No products saved yet. Use the Product Hunter to find winning products.
+            </div>
+          ) : (
+            <div style={{overflowX:'auto'}}>
+              <table className="inv-items-table" style={{minWidth:900}}>
+                <thead>
+                  <tr>
+                    <th>Product</th><th>Marketplace</th><th>AI Score</th>
+                    <th>Cost</th><th>Price</th><th>Profit</th><th>Status</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map(p=>(
+                    <tr key={p.id}>
+                      <td style={{color:'#f1f5f9',fontWeight:600}}>{p.product_name}</td>
+                      <td>{p.marketplace}</td>
+                      <td><span style={{color:SCORE_COLOR(p.ai_score),fontWeight:700}}>{p.ai_score}</span></td>
+                      <td>${p.supplier_cost?.toFixed(2)}</td>
+                      <td>${p.selling_price?.toFixed(2)}</td>
+                      <td style={{color:'#10b981'}}>${p.estimated_profit?.toFixed(2)}</td>
+                      <td>
+                        <select value={p.status} onChange={e=>updateProductStatus(p.id,e.target.value)}
+                          style={{background:'#1e293b',color:STATUS_COLOR[p.status]||'#94a3b8',border:'1px solid #334155',borderRadius:4,padding:'2px 6px',fontSize:'.78rem'}}>
+                          <option value="research">Research</option>
+                          <option value="approved">Approved</option>
+                          <option value="listed">Listed</option>
+                          <option value="rejected">Rejected</option>
+                        </select>
+                      </td>
+                      <td>
+                        <button className="btn btn-sm" style={{background:'#ef4444',color:'#fff',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer'}} onClick={()=>deleteProduct(p.id)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {panel === 'profit' && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+            <div className="card">
+              <h3 style={{color:'#f1f5f9',marginBottom:16}}>Profit Calculator</h3>
+              {[
+                ['selling_price','Selling Price ($)'],
+                ['product_cost','Product Cost ($)'],
+                ['marketplace_fee','Marketplace Fee ($)'],
+                ['shipping_cost','Shipping Cost ($)'],
+                ['packaging_cost','Packaging Cost ($)'],
+                ['advertising_cost','Advertising Cost ($)'],
+                ['return_allowance','Return Allowance ($)'],
+                ['other_costs','Other Costs ($)'],
+              ].map(([k,lbl])=>(
+                <div key={k} style={{marginBottom:10}}>
+                  <label className="form-label">{lbl}</label>
+                  <input className="form-control" type="number" placeholder="0.00" value={profitForm[k]}
+                    onChange={e=>setProfitForm(f=>({...f,[k]:e.target.value}))} />
+                </div>
+              ))}
+              <button className="btn btn-primary" style={{width:'100%',marginTop:8}} onClick={calcProfit}>
+                Calculate Profit
+              </button>
+            </div>
+
+            {profitResult && (
+              <div className="card" style={{display:'flex',flexDirection:'column',gap:14}}>
+                <h3 style={{color:'#f1f5f9',marginBottom:4}}>Results</h3>
+                {[
+                  ['Selling Price', `$${profitResult.selling_price}`, '#f1f5f9'],
+                  ['Total Costs',   `$${profitResult.total_cost}`,    '#ef4444'],
+                  ['Net Profit',    `$${profitResult.net_profit}`,    profitResult.net_profit >= 0 ? '#10b981' : '#ef4444'],
+                  ['ROI',           `${profitResult.roi_percent}%`,   profitResult.roi_percent >= 20 ? '#10b981' : '#f59e0b'],
+                  ['Margin',        `${profitResult.margin_percent}%`,profitResult.margin_percent >= 20 ? '#10b981' : '#f59e0b'],
+                  ['Break Even',    `$${profitResult.break_even}`,    '#94a3b8'],
+                ].map(([lbl,val,clr])=>(
+                  <div key={lbl} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid #1e293b'}}>
+                    <span style={{color:'#94a3b8'}}>{lbl}</span>
+                    <strong style={{color:clr,fontSize:'1.1rem'}}>{val}</strong>
+                  </div>
+                ))}
+                <div style={{marginTop:8,padding:12,background:'#0f172a',borderRadius:8,border:`1px solid ${profitResult.net_profit>=0?'#10b981':'#ef4444'}`}}>
+                  <span style={{color:profitResult.net_profit>=0?'#10b981':'#ef4444',fontWeight:700}}>
+                    {profitResult.net_profit >= 0 ? '✅ Profitable' : '❌ Not Profitable'}
+                    {profitResult.roi_percent >= 30 ? ' — Excellent ROI!' : profitResult.roi_percent >= 15 ? ' — Good ROI' : ''}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {panel === 'listing' && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+            <div className="card">
+              <h3 style={{color:'#f1f5f9',marginBottom:16}}>AI Listing Builder</h3>
+              <div style={{marginBottom:10}}>
+                <label className="form-label">Marketplace</label>
+                <select className="form-control" value={listForm.marketplace} onChange={e=>setListForm(f=>({...f,marketplace:e.target.value}))}>
+                  {ECOM_MARKETPLACES.map(m=><option key={m}>{m}</option>)}
+                </select>
+              </div>
+              <div style={{marginBottom:10}}>
+                <label className="form-label">Product Name</label>
+                <input className="form-control" placeholder="e.g. Portable Mini Blender" value={listForm.product_name} onChange={e=>setListForm(f=>({...f,product_name:e.target.value}))} />
+              </div>
+              <div style={{marginBottom:10}}>
+                <label className="form-label">Product Features</label>
+                <textarea className="form-control" rows={3} placeholder="e.g. 6-blade design, USB-C charging, 300ml capacity, BPA-free..." value={listForm.features} onChange={e=>setListForm(f=>({...f,features:e.target.value}))} />
+              </div>
+              <div style={{marginBottom:10}}>
+                <label className="form-label">Target Audience</label>
+                <input className="form-control" placeholder="e.g. gym enthusiasts, college students" value={listForm.target_audience} onChange={e=>setListForm(f=>({...f,target_audience:e.target.value}))} />
+              </div>
+              <div style={{marginBottom:10}}>
+                <label className="form-label">SEO Keywords</label>
+                <input className="form-control" placeholder="e.g. portable blender, smoothie maker" value={listForm.keywords} onChange={e=>setListForm(f=>({...f,keywords:e.target.value}))} />
+              </div>
+              <div style={{marginBottom:16}}>
+                <label className="form-label">Brand Voice</label>
+                <select className="form-control" value={listForm.brand_voice} onChange={e=>setListForm(f=>({...f,brand_voice:e.target.value}))}>
+                  {['professional','friendly','energetic','luxury','minimalist','playful'].map(v=><option key={v}>{v}</option>)}
+                </select>
+              </div>
+              <button className="btn btn-primary" style={{width:'100%'}} onClick={doBuildListing} disabled={building||!listForm.product_name}>
+                {building ? '⚙️ Building Listing...' : '✨ Generate AI Listing'}
+              </button>
+            </div>
+
+            {listing && (
+              <div className="card">
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                  <h3 style={{color:'#f1f5f9',margin:0}}>Generated Listing</h3>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-sm btn-teal" onClick={saveListing} disabled={savingListing}>{savingListing?'Saving...':'Save'}</button>
+                  </div>
+                </div>
+                {[
+                  ['SEO Title', listing.title],
+                  ['Bullet Points', listing.bullets],
+                  ['Description', listing.description],
+                  ['Backend Keywords', listing.keywords],
+                  ['Ad Headline', listing.ad_headline],
+                ].map(([lbl, val])=>(
+                  <div key={lbl} style={{marginBottom:14}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                      <span style={{fontSize:'.78rem',fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>{lbl}</span>
+                      <button onClick={()=>copyText(val)} style={{fontSize:'.7rem',background:'#1e293b',color:'#94a3b8',border:'none',borderRadius:4,padding:'2px 8px',cursor:'pointer'}}>Copy</button>
+                    </div>
+                    <div style={{background:'#0f172a',border:'1px solid #1e293b',borderRadius:6,padding:'8px 12px',color:'#e2e8f0',fontSize:'.85rem',whiteSpace:'pre-wrap',lineHeight:1.6}}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {panel === 'listings' && (
+        <div>
+          <h3 style={{color:'#f1f5f9',marginBottom:16}}>My Saved Listings</h3>
+          {listings.length === 0 ? (
+            <div className="card" style={{textAlign:'center',color:'#94a3b8',padding:'40px'}}>No listings saved yet. Use Listing Builder to create your first listing.</div>
+          ) : (
+            <div className="ecom-listing-grid">
+              {listings.map(l=>(
+                <div className="card" key={l.id} style={{borderLeft:`3px solid ${STATUS_COLOR[l.status]||'#334155'}`}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                    <span style={{color:'#f1f5f9',fontWeight:600}}>{l.marketplace}</span>
+                    <span style={{fontSize:'.75rem',color:STATUS_COLOR[l.status]||'#94a3b8',textTransform:'uppercase'}}>{l.status}</span>
+                  </div>
+                  <div style={{color:'#e2e8f0',fontSize:'.9rem',marginBottom:6,fontWeight:600}}>{l.title}</div>
+                  <div style={{color:'#94a3b8',fontSize:'.78rem',display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,marginTop:8}}>
+                    <button onClick={()=>copyText(l.title||'')} style={{background:'#1e293b',color:'#94a3b8',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:'.75rem'}}>Copy Title</button>
+                    <button onClick={()=>copyText(l.bullets||'')} style={{background:'#1e293b',color:'#94a3b8',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:'.75rem'}}>Copy Bullets</button>
+                    <button onClick={()=>copyText(l.description||'')} style={{background:'#1e293b',color:'#94a3b8',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:'.75rem'}}>Copy Desc</button>
+                    <button onClick={()=>copyText(l.keywords||'')} style={{background:'#1e293b',color:'#94a3b8',border:'none',borderRadius:4,padding:'4px 8px',cursor:'pointer',fontSize:'.75rem'}}>Copy Keywords</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {panel === 'dropship' && (
+        <div>
+          <div className="ds-hero">
+            <div>
+              <h3 style={{color:'#f1f5f9',margin:'0 0 4px',fontSize:'1.2rem',fontWeight:800}}>🏭 Dropship & Wholesale Supplier Directory</h3>
+              <p style={{color:'#64748b',margin:0,fontSize:'.88rem'}}>
+                {dsSuppliers.length} vetted suppliers — USA, EU, Asia, India &amp; Global. Filter by region, type, and shipping.
+              </p>
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="ds-filter-bar">
+            <input className="form-control" placeholder="Search suppliers, categories..."
+              autoComplete="off" value={dsFilter.search}
+              onChange={e=>updateDsFilter('search', e.target.value)}
+              style={{maxWidth:240}} />
+            <select className="form-control" value={dsFilter.region}
+              onChange={e=>updateDsFilter('region', e.target.value)}>
+              <option value="">All Regions</option>
+              {['USA','EU','Asia','India','LatAm','Global'].map(r=><option key={r}>{r}</option>)}
+            </select>
+            <select className="form-control" value={dsFilter.platform_type}
+              onChange={e=>updateDsFilter('platform_type', e.target.value)}>
+              <option value="">All Types</option>
+              {['dropshipper','wholesaler','distributor','POD','aggregator'].map(t=><option key={t} value={t}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+            </select>
+            <select className="form-control" value={dsFilter.has_usa_warehouse}
+              onChange={e=>updateDsFilter('has_usa_warehouse', e.target.value)}>
+              <option value="">USA Warehouse: Any</option>
+              <option value="true">USA Warehouse: Yes</option>
+              <option value="false">USA Warehouse: No</option>
+            </select>
+            <select className="form-control" value={dsFilter.dropship_ready}
+              onChange={e=>updateDsFilter('dropship_ready', e.target.value)}>
+              <option value="">Dropship: Any</option>
+              <option value="true">Dropship Ready</option>
+            </select>
+            <button className="btn btn-sm" style={{background:'#1e293b',color:'#94a3b8',border:'1px solid #334155',borderRadius:6,padding:'6px 14px',cursor:'pointer',whiteSpace:'nowrap'}}
+              onClick={clearDsFilters}>
+              ✕ Clear
+            </button>
+            <button className="btn btn-sm" style={{background:'#1e293b',color:'#38bdf8',border:'1px solid #1e4d72',borderRadius:6,padding:'6px 14px',cursor:'pointer',whiteSpace:'nowrap'}}
+              onClick={()=>loadDropship(dsFilterRef.current)}>
+              ↺ Reload
+            </button>
+          </div>
+
+          {dsLoading && <div style={{textAlign:'center',color:'#64748b',padding:24}}>Loading suppliers...</div>}
+
+          {/* Supplier Detail Modal */}
+          {dsSelected && (
+            <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+              <div style={{background:'#0f172a',border:'1px solid #1e293b',borderRadius:16,maxWidth:600,width:'100%',maxHeight:'85vh',overflowY:'auto',padding:28}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
+                  <div>
+                    <h3 style={{color:'#f1f5f9',margin:'0 0 4px',fontSize:'1.15rem'}}>{dsSelected.name}</h3>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <span className="ds-badge ds-badge-region">{dsSelected.region}</span>
+                      <span className="ds-badge ds-badge-type">{dsSelected.platform_type}</span>
+                      {dsSelected.has_usa_warehouse && <span className="ds-badge ds-badge-usa">🇺🇸 USA Warehouse</span>}
+                      {dsSelected.dropship_ready && <span className="ds-badge ds-badge-drop">Dropship Ready</span>}
+                      {dsSelected.api_integration && <span className="ds-badge ds-badge-api">API</span>}
+                    </div>
+                  </div>
+                  <button onClick={()=>setDsSelected(null)} style={{background:'none',border:'none',color:'#94a3b8',fontSize:'1.4rem',cursor:'pointer',lineHeight:1}}>×</button>
+                </div>
+                <p style={{color:'#94a3b8',fontSize:'.9rem',lineHeight:1.7,marginBottom:16}}>{dsSelected.description}</p>
+                <div className="ds-detail-grid">
+                  <div><span>Country</span><strong>{dsSelected.country}</strong></div>
+                  <div><span>Min Order</span><strong>{dsSelected.min_order_usd === 0 ? 'No Minimum' : `$${dsSelected.min_order_usd}`}</strong></div>
+                  <div><span>USA Ship Time</span><strong style={{color:'#10b981'}}>{dsSelected.shipping_days_usa} days</strong></div>
+                  <div><span>Intl Ship Time</span><strong>{dsSelected.shipping_days_intl} days</strong></div>
+                  <div><span>Rating</span><strong style={{color:'#f59e0b'}}>⭐ {dsSelected.rating}</strong></div>
+                  <div><span>Website</span><strong style={{color:'#38bdf8'}}>{dsSelected.website}</strong></div>
+                </div>
+                {dsSelected.categories && (() => {
+                  try {
+                    const cats = JSON.parse(dsSelected.categories)
+                    return (
+                      <div style={{marginTop:16}}>
+                        <div style={{fontSize:'.78rem',color:'#64748b',fontWeight:700,textTransform:'uppercase',marginBottom:8}}>Categories</div>
+                        <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                          {cats.map(c=><span key={c} style={{background:'#1e293b',color:'#94a3b8',borderRadius:6,padding:'3px 10px',fontSize:'.78rem'}}>{c}</span>)}
+                        </div>
+                      </div>
+                    )
+                  } catch { return null }
+                })()}
+                <button className="btn btn-primary" style={{width:'100%',marginTop:20}}
+                  onClick={()=>window.open(`https://${dsSelected.website}`,'_blank')}>
+                  Visit Website →
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="ds-grid">
+            {dsSuppliers.map(s=>(
+              <div key={s.id} className="ds-card" onClick={()=>setDsSelected(s)}>
+                <div className="ds-card-header">
+                  <div className="ds-card-name">{s.name}</div>
+                  <div className="ds-card-rating">⭐ {s.rating}</div>
+                </div>
+                <div style={{display:'flex',gap:4,flexWrap:'wrap',margin:'8px 0'}}>
+                  <span className="ds-badge ds-badge-region">{s.region}</span>
+                  <span className="ds-badge ds-badge-type">{s.platform_type}</span>
+                  {s.has_usa_warehouse && <span className="ds-badge ds-badge-usa">🇺🇸 USA</span>}
+                  {s.dropship_ready && <span className="ds-badge ds-badge-drop">Dropship</span>}
+                  {s.api_integration && <span className="ds-badge ds-badge-api">API</span>}
+                </div>
+                <div className="ds-card-ships">
+                  <span>🚚 USA: <strong style={{color:'#10b981'}}>{s.shipping_days_usa}d</strong></span>
+                  <span>🌍 Intl: <strong>{s.shipping_days_intl}d</strong></span>
+                  <span>Min: <strong>{s.min_order_usd===0?'None':'$'+s.min_order_usd}</strong></span>
+                </div>
+                <div className="ds-card-desc">{s.description?.slice(0,110)}{s.description?.length>110?'…':''}</div>
+                <div className="ds-card-footer">
+                  <span style={{color:'#38bdf8',fontSize:'.78rem'}}>{s.website}</span>
+                  <span style={{color:'#64748b',fontSize:'.75rem'}}>Click for details →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const AGENT_ROSTER_FALLBACK = [
   {id:'call-center',name:'Call Center Agent',icon:'🎧',status:'active'},
   {id:'appointment',name:'Appointment Agent',icon:'📅',status:'active'},
@@ -4703,28 +5872,32 @@ function AppInner() {
   }, [])
 
   const TABS = [
-    { id: 'home',          label: t.tabs.home },
-    { id: 'smartboss',     label: '🧠 SmartBoss AI' },
-    { id: 'dashboard',     label: t.tabs.dashboard },
-    { id: 'crm',           label: '💼 CRM & Sales' },
-    { id: 'recruitment',   label: '👔 Recruitment' },
-    { id: 'marketing',     label: '📢 Marketing' },
-    { id: 'call-center',   label: t.tabs.callCenter },
-    { id: 'calltrack',     label: '📊 CallTrack AI' },
-    { id: 'automation',    label: '⚡ Automation' },
-    { id: 'businesses',    label: t.tabs.businesses },
-    { id: 'appointments',  label: t.tabs.appointments },
-    { id: 'approval',      label: '📋 Approvals' },
-    { id: 'data-entry',    label: '📄 Data Entry AI' },
-    { id: 'healthcare',    label: '🏥 Healthcare' },
-    { id: 'marketplace',   label: '🏪 DME Market' },
-    { id: 'agents',        label: '🤖 Agents' },
-    { id: 'commander',     label: '🤖 Commander AI' },
-    { id: 'ai',            label: t.tabs.ai },
-    { id: 'subscriptions', label: '💎 Pricing' },
+    { id: 'home',            label: t.tabs.home },
+    { id: 'smartboss',       label: '🧠 SmartBoss AI' },
+    { id: 'dashboard',       label: t.tabs.dashboard },
+    { id: 'crm',             label: '💼 CRM & Sales' },
+    { id: 'recruitment',     label: '👔 Recruitment' },
+    { id: 'marketing',       label: '📢 Marketing' },
+    { id: 'call-center',     label: t.tabs.callCenter },
+    { id: 'calltrack',       label: '📊 CallTrack AI' },
+    { id: 'automation',      label: '⚡ Automation' },
+    { id: 'businesses',      label: t.tabs.businesses },
+    { id: 'appointments',    label: t.tabs.appointments },
+    { id: 'approval',        label: '📋 Approvals' },
+    { id: 'invoices',        label: '🧾 Invoices' },
+    { id: 'data-entry',      label: '📄 Data Entry AI' },
+    { id: 'healthcare',      label: '🏥 Healthcare' },
+    { id: 'marketplace',     label: '🏪 DME Market' },
+    { id: 'agents',          label: '🤖 Agents' },
+    { id: 'commander',       label: '🤖 Commander AI' },
+    { id: 'website-builder', label: '🖥️ Website Builder' },
+    { id: 'content-studio',  label: '🎬 Content Studio' },
+    { id: 'ecommerce',       label: '🛒 E-Commerce' },
+    { id: 'ai',              label: t.tabs.ai },
+    { id: 'subscriptions',   label: '💎 Pricing' },
   ]
 
-  const COMING_SOON_IDS = ['website-builder', 'content-studio']
+  const COMING_SOON_IDS = []
 
   return (
     <div className="app">
@@ -4789,25 +5962,29 @@ function AppInner() {
           ))}
         </div>
 
-        {activeTab === 'home'          && <HomeTab onNavigate={setActiveTab} />}
-        {activeTab === 'smartboss'     && <SmartBossTab />}
-        {activeTab === 'dashboard'     && <DashboardTab wsConnected={wsConnected} />}
-        {activeTab === 'crm'           && <CRMTab />}
-        {activeTab === 'recruitment'   && <RecruitmentTab />}
-        {activeTab === 'marketing'     && <MarketingSuiteTab />}
-        {activeTab === 'call-center'   && <CallCenterTab />}
-        {activeTab === 'calltrack'     && <CallTrackTab />}
-        {activeTab === 'automation'    && <AutomationTab />}
-        {activeTab === 'businesses'    && <BusinessesTab />}
-        {activeTab === 'appointments'  && <AppointmentsTab />}
-        {activeTab === 'approval'      && <ApprovalQueueTab />}
-        {activeTab === 'data-entry'    && <DataEntryTab />}
-        {activeTab === 'healthcare'    && <HealthcareTab />}
-        {activeTab === 'marketplace'   && <DMEMarketplaceTab />}
-        {activeTab === 'agents'        && <AgentsTab />}
-        {activeTab === 'commander'     && <CommanderTab />}
-        {activeTab === 'ai'            && <AIAnalyzerTab />}
-        {activeTab === 'subscriptions' && <SubscriptionsTab />}
+        {activeTab === 'home'            && <HomeTab onNavigate={setActiveTab} />}
+        {activeTab === 'smartboss'       && <SmartBossTab />}
+        {activeTab === 'dashboard'       && <DashboardTab wsConnected={wsConnected} />}
+        {activeTab === 'crm'             && <CRMTab />}
+        {activeTab === 'recruitment'     && <RecruitmentTab />}
+        {activeTab === 'marketing'       && <MarketingSuiteTab />}
+        {activeTab === 'call-center'     && <CallCenterTab />}
+        {activeTab === 'calltrack'       && <CallTrackTab />}
+        {activeTab === 'automation'      && <AutomationTab />}
+        {activeTab === 'businesses'      && <BusinessesTab />}
+        {activeTab === 'appointments'    && <AppointmentsTab />}
+        {activeTab === 'approval'        && <ApprovalQueueTab />}
+        {activeTab === 'invoices'        && <InvoicesTab />}
+        {activeTab === 'data-entry'      && <DataEntryTab />}
+        {activeTab === 'healthcare'      && <HealthcareTab />}
+        {activeTab === 'marketplace'     && <DMEMarketplaceTab />}
+        {activeTab === 'agents'          && <AgentsTab />}
+        {activeTab === 'commander'       && <CommanderTab />}
+        {activeTab === 'website-builder' && <WebsiteBuilderTab />}
+        {activeTab === 'content-studio'  && <ContentStudioTab />}
+        {activeTab === 'ecommerce'       && <EcommerceTab />}
+        {activeTab === 'ai'              && <AIAnalyzerTab />}
+        {activeTab === 'subscriptions'   && <SubscriptionsTab />}
         {COMING_SOON_IDS.includes(activeTab) && <ComingSoonTab tabId={activeTab} onBack={() => setActiveTab('home')} />}
       </main>
 
