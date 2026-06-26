@@ -4382,16 +4382,112 @@ function EcommerceTab() {
 
   const copyText = (txt) => { navigator.clipboard.writeText(txt).catch(()=>{}); setSuccess('Copied!'); setTimeout(()=>setSuccess(''),2000) }
 
+  // ── Agent Search state ────────────────────────────────────────────────────
+  const SORT_OPTIONS = [
+    { value:'TRENDING',          label:'🔥 Trending Products' },
+    { value:'HIGH_PROFIT',       label:'💰 High Profit Margin' },
+    { value:'LOW_COMPETITION',   label:'🎯 Low Competition' },
+    { value:'BEST_RATING',       label:'⭐ Best Rating' },
+    { value:'FAST_SHIPPING',     label:'🚀 Fast Shipping' },
+    { value:'PRICE_LOW_TO_HIGH', label:'💲 Price: Low → High' },
+    { value:'PRICE_HIGH_TO_LOW', label:'💲 Price: High → Low' },
+    { value:'NEW_UPCOMING',      label:'🆕 New & Upcoming' },
+  ]
+  const PLATFORMS = ['SHOPIFY','AMAZON','EBAY','WALMART','TIKTOK_SHOP','FACEBOOK_SHOP']
+  const [agentSearch, setAgentSearch] = React.useState({ command:'', category:'', platform:'', maxBudget:'', minProfitMargin:'', sortBy:'TRENDING' })
+  const [agentResults, setAgentResults] = React.useState(null)
+  const [agentLoading, setAgentLoading] = React.useState(false)
+
+  // ── Customer Chat state ───────────────────────────────────────────────────
+  const [chatMessages, setChatMessages] = React.useState([{ role:'agent', text:'👋 Hi! I\'m your AI Sales Agent. How can I help you today?' }])
+  const [chatInput, setChatInput] = React.useState('')
+  const [chatLoading, setChatLoading] = React.useState(false)
+
+  // ── Reports state ─────────────────────────────────────────────────────────
+  const [report, setReport] = React.useState(null)
+  const [reportLoading, setReportLoading] = React.useState(false)
+
+  // ── Supplier contact state ────────────────────────────────────────────────
+  const [supplierContact, setSupplierContact] = React.useState({ productId:'', message:'' })
+  const [supplierMsg, setSupplierMsg] = React.useState(null)
+
+  const doAgentSearch = async () => {
+    setAgentLoading(true); setAgentResults(null)
+    try {
+      const r = await apiFetch('/ecom/agent/search', { method:'POST', body: JSON.stringify(agentSearch) })
+      setAgentResults(r)
+    } catch(e) { setError(e.message) }
+    setAgentLoading(false)
+  }
+
+  const requestApproval = async (id) => {
+    try {
+      await apiFetch(`/ecom/products/${id}/request-approval`, { method:'POST' })
+      setSuccess('Sent for admin approval!'); loadProducts(); loadStats()
+    } catch(e) { setError(e.message) }
+  }
+
+  const approveProduct = async (id) => {
+    try {
+      await apiFetch(`/ecom/products/${id}/approve`, { method:'POST' })
+      setSuccess('Product approved!'); loadProducts(); loadStats()
+    } catch(e) { setError(e.message) }
+  }
+
+  const publishProduct = async (id, platform) => {
+    try {
+      await apiFetch(`/ecom/products/${id}/publish`, { method:'POST', body: JSON.stringify({ platform }) })
+      setSuccess(`Published to ${platform}!`); loadProducts(); loadStats()
+    } catch(e) { setError(e.message) }
+  }
+
+  const sendChat = async () => {
+    if (!chatInput.trim()) return
+    const userMsg = chatInput.trim()
+    setChatInput('')
+    setChatMessages(m => [...m, { role:'user', text: userMsg }])
+    setChatLoading(true)
+    try {
+      const r = await apiFetch('/ecom/agent/customer-chat', { method:'POST', body: JSON.stringify({ customerMessage: userMsg }) })
+      setChatMessages(m => [...m, { role:'agent', text: r.response }])
+    } catch { setChatMessages(m => [...m, { role:'agent', text:'Sorry, I had trouble connecting. Please try again.' }]) }
+    setChatLoading(false)
+  }
+
+  const contactSupplier = async () => {
+    try {
+      const r = await apiFetch('/ecom/agent/contact-supplier', { method:'POST', body: JSON.stringify({ productId: supplierContact.productId, message: supplierContact.message }) })
+      setSupplierMsg(r.preparedMessage)
+    } catch(e) { setError(e.message) }
+  }
+
+  const loadReport = async () => {
+    setReportLoading(true)
+    try { setReport(await apiFetch('/ecom/agent/reports')) } catch(e) { setError(e.message) }
+    setReportLoading(false)
+  }
+
   const panels = [
     { id:'hunter',    label:'🎯 Product Hunter' },
     { id:'products',  label:'📦 My Products' },
+    { id:'agent',     label:'🤖 AI Agent Search' },
+    { id:'approval',  label:'✅ Admin Approval' },
     { id:'profit',    label:'💰 Profit Calculator' },
     { id:'listing',   label:'📝 Listing Builder' },
     { id:'listings',  label:'🗂️ My Listings' },
+    { id:'chat',      label:'💬 Sales Chat' },
+    { id:'reports',   label:'📊 Reports' },
     { id:'dropship',  label:'🏭 Supplier Directory' },
   ]
 
-  const STATUS_COLOR = { research:'#64748b', approved:'#10b981', rejected:'#ef4444', listed:'#3b82f6' }
+  const STATUS_COLOR = {
+    research:'#64748b', approved:'#10b981', rejected:'#ef4444',
+    listed:'#3b82f6', needs_admin_approval:'#f59e0b', published:'#8b5cf6', draft:'#64748b'
+  }
+  const STATUS_LABEL = {
+    research:'Research', approved:'✅ Approved', rejected:'❌ Rejected',
+    listed:'📋 Listed', needs_admin_approval:'⏳ Pending Approval', published:'🚀 Published', draft:'Draft'
+  }
 
   return (
     <div className="tab-content">
@@ -4681,6 +4777,277 @@ function EcommerceTab() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── AI Agent Search Panel ── */}
+      {panel === 'agent' && (
+        <div>
+          <div className="card" style={{marginBottom:20}}>
+            <h3 style={{color:'#f1f5f9',marginBottom:4,fontSize:'1.1rem',fontWeight:800}}>🤖 EZ-NEXUS AI Ecommerce Agent</h3>
+            <p style={{color:'#64748b',marginBottom:16,fontSize:'.85rem'}}>Search products with AI-powered filters, sort by profit/trending/competition, and manage approval workflow.</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+              <div>
+                <label className="form-label">Category</label>
+                <input className="input" placeholder="e.g. Electronics" value={agentSearch.category} onChange={e=>setAgentSearch(f=>({...f,category:e.target.value}))} />
+              </div>
+              <div>
+                <label className="form-label">Platform</label>
+                <select className="form-control" value={agentSearch.platform} onChange={e=>setAgentSearch(f=>({...f,platform:e.target.value}))}>
+                  <option value="">All Platforms</option>
+                  {PLATFORMS.map(p=><option key={p} value={p}>{p.replace('_',' ')}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Sort By</label>
+                <select className="form-control" value={agentSearch.sortBy} onChange={e=>setAgentSearch(f=>({...f,sortBy:e.target.value}))}>
+                  {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Max Budget (Cost Price $)</label>
+                <input className="input" type="number" placeholder="e.g. 20" value={agentSearch.maxBudget} onChange={e=>setAgentSearch(f=>({...f,maxBudget:e.target.value}))} />
+              </div>
+              <div>
+                <label className="form-label">Min Profit Margin (%)</label>
+                <input className="input" type="number" placeholder="e.g. 50" value={agentSearch.minProfitMargin} onChange={e=>setAgentSearch(f=>({...f,minProfitMargin:e.target.value}))} />
+              </div>
+              <div>
+                <label className="form-label">AI Command (optional)</label>
+                <input className="input" placeholder="Find profitable trending electronics..." value={agentSearch.command} onChange={e=>setAgentSearch(f=>({...f,command:e.target.value}))} />
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={doAgentSearch} disabled={agentLoading}>{agentLoading ? '🔍 Searching...' : '🔍 Search Products'}</button>
+          </div>
+
+          {agentResults && (
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                <h3 style={{color:'#f1f5f9',margin:0}}>Results — {agentResults.totalProducts} products ({agentResults.sortBy})</h3>
+              </div>
+              {agentResults.products.length === 0 && <p style={{color:'#64748b',textAlign:'center',padding:32}}>No products match these filters. Try adjusting your search.</p>}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
+                {agentResults.products.map(p => (
+                  <div key={p.id} style={{background:'#1e293b',border:'1px solid #334155',borderRadius:12,padding:18,position:'relative'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                      <span style={{background:STATUS_COLOR[p.status]||'#64748b',color:'#fff',padding:'2px 8px',borderRadius:20,fontSize:'.7rem',fontWeight:700}}>{STATUS_LABEL[p.status]||p.status}</span>
+                      <span style={{color:'#a78bfa',fontSize:'.8rem',fontWeight:700}}>AI: {p.aiScore}</span>
+                    </div>
+                    <h4 style={{color:'#f1f5f9',margin:'0 0 6px',fontSize:'.95rem'}}>{p.title}</h4>
+                    <p style={{color:'#64748b',margin:'0 0 10px',fontSize:'.78rem'}}>{p.category} · {p.marketplace}</p>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:12}}>
+                      {[
+                        ['Cost', `$${p.costPrice.toFixed(2)}`,'#94a3b8'],
+                        ['Sale', `$${p.salePrice.toFixed(2)}`,'#22c55e'],
+                        ['Margin', `${p.profitMargin}%`, p.profitMargin>=50?'#22c55e':p.profitMargin>=30?'#f59e0b':'#ef4444'],
+                        ['Trend', `${p.trendScore}/100`, '#38bdf8'],
+                        ['Competition', `${p.competitionScore}/100`, p.competitionScore<50?'#22c55e':'#f59e0b'],
+                        ['Supplier', p.supplierName,'#a78bfa'],
+                      ].map(([k,v,c])=>(
+                        <div key={k} style={{background:'#0f172a',borderRadius:6,padding:'5px 8px'}}>
+                          <div style={{color:'#64748b',fontSize:'.65rem'}}>{k}</div>
+                          <div style={{color:c||'#f1f5f9',fontSize:'.82rem',fontWeight:600}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {(p.status==='research'||p.status==='draft') && <button className="btn" style={{fontSize:'.72rem',padding:'4px 10px',background:'#f59e0b',color:'#000'}} onClick={()=>requestApproval(p.id)}>📋 Request Approval</button>}
+                      {p.status==='needs_admin_approval' && <button className="btn btn-primary" style={{fontSize:'.72rem',padding:'4px 10px'}} onClick={()=>approveProduct(p.id)}>✅ Approve</button>}
+                      {p.status==='approved' && PLATFORMS.map(pl=>(
+                        <button key={pl} className="btn" style={{fontSize:'.65rem',padding:'3px 7px',background:'#7c3aed',color:'#fff'}} onClick={()=>publishProduct(p.id,pl)}>🚀 {pl.replace('_',' ')}</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Admin Approval Panel ── */}
+      {panel === 'approval' && (
+        <div>
+          <h3 style={{color:'#f1f5f9',marginBottom:16}}>✅ Admin Approval Workflow</h3>
+          <div style={{display:'grid',gap:16}}>
+            {['needs_admin_approval','approved','published'].map(statusFilter => {
+              const statusProducts = products.filter(p=>p.status===statusFilter)
+              return (
+                <div key={statusFilter} className="card">
+                  <h4 style={{color:STATUS_COLOR[statusFilter]||'#f1f5f9',marginBottom:12,fontSize:'1rem'}}>
+                    {STATUS_LABEL[statusFilter]} ({statusProducts.length})
+                  </h4>
+                  {statusProducts.length === 0 && <p style={{color:'#64748b',fontSize:'.85rem'}}>No products in this stage.</p>}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+                    {statusProducts.map(p => (
+                      <div key={p.id} style={{background:'#0f172a',border:`1px solid ${STATUS_COLOR[p.status]}44`,borderRadius:10,padding:14}}>
+                        <div style={{fontWeight:700,color:'#f1f5f9',marginBottom:4,fontSize:'.9rem'}}>{p.product_name}</div>
+                        <div style={{color:'#64748b',fontSize:'.75rem',marginBottom:8}}>{p.category} · {p.marketplace} · Score: {p.ai_score}</div>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                          {statusFilter==='needs_admin_approval' && <>
+                            <button className="btn btn-primary" style={{fontSize:'.72rem',padding:'4px 10px'}} onClick={()=>approveProduct(p.id)}>✅ Approve</button>
+                            <button className="btn" style={{fontSize:'.72rem',padding:'4px 10px',background:'#ef4444',color:'#fff'}} onClick={()=>updateProductStatus(p.id,'rejected')}>❌ Reject</button>
+                          </>}
+                          {statusFilter==='approved' && PLATFORMS.map(pl=>(
+                            <button key={pl} className="btn" style={{fontSize:'.65rem',padding:'3px 7px',background:'#7c3aed',color:'#fff'}} onClick={()=>publishProduct(p.id,pl)}>🚀 {pl.replace('_',' ')}</button>
+                          ))}
+                          {statusFilter==='published' && <span style={{color:'#8b5cf6',fontSize:'.78rem'}}>Live on {p.marketplace}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+            {/* Also show products pending approval request */}
+            <div className="card">
+              <h4 style={{color:'#64748b',marginBottom:12,fontSize:'1rem'}}>📦 Draft / Research ({products.filter(p=>p.status==='research'||p.status==='draft').length})</h4>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+                {products.filter(p=>p.status==='research'||p.status==='draft').map(p=>(
+                  <div key={p.id} style={{background:'#0f172a',border:'1px solid #334155',borderRadius:10,padding:14}}>
+                    <div style={{fontWeight:700,color:'#f1f5f9',marginBottom:4,fontSize:'.9rem'}}>{p.product_name}</div>
+                    <div style={{color:'#64748b',fontSize:'.75rem',marginBottom:8}}>{p.category}</div>
+                    <button className="btn" style={{fontSize:'.72rem',padding:'4px 10px',background:'#f59e0b',color:'#000'}} onClick={()=>requestApproval(p.id)}>📋 Request Approval</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Customer Sales Chat Panel ── */}
+      {panel === 'chat' && (
+        <div>
+          <div className="card" style={{maxWidth:700,margin:'0 auto'}}>
+            <h3 style={{color:'#f1f5f9',marginBottom:4,fontSize:'1.1rem',fontWeight:800}}>💬 AI Sales Agent Chat</h3>
+            <p style={{color:'#64748b',marginBottom:16,fontSize:'.82rem'}}>Powered by Claude AI — answers customer questions, handles objections, and helps close sales.</p>
+            <div style={{background:'#0f172a',borderRadius:10,padding:16,minHeight:300,maxHeight:400,overflowY:'auto',marginBottom:12,display:'flex',flexDirection:'column',gap:10}}>
+              {chatMessages.map((m,i)=>(
+                <div key={i} style={{display:'flex',justifyContent:m.role==='user'?'flex-end':'flex-start'}}>
+                  <div style={{
+                    background: m.role==='user'?'#3b82f6':'#1e293b',
+                    color:'#f1f5f9', borderRadius:12, padding:'8px 14px',
+                    maxWidth:'75%', fontSize:'.88rem', lineHeight:1.5
+                  }}>{m.text}</div>
+                </div>
+              ))}
+              {chatLoading && <div style={{color:'#64748b',fontSize:'.82rem'}}>🤖 Agent is typing...</div>}
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <input className="input" style={{flex:1}} placeholder="Type a customer question..." value={chatInput}
+                onChange={e=>setChatInput(e.target.value)}
+                onKeyDown={e=>e.key==='Enter'&&!chatLoading&&sendChat()} />
+              <button className="btn btn-primary" onClick={sendChat} disabled={chatLoading||!chatInput.trim()}>Send</button>
+            </div>
+          </div>
+
+          {/* Supplier Contact */}
+          <div className="card" style={{maxWidth:700,margin:'20px auto 0'}}>
+            <h3 style={{color:'#f1f5f9',marginBottom:12,fontSize:'1rem',fontWeight:700}}>📧 AI Supplier Outreach</h3>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+              <div>
+                <label className="form-label">Product ID (optional)</label>
+                <input className="input" placeholder="e.g. 1" value={supplierContact.productId} onChange={e=>setSupplierContact(f=>({...f,productId:e.target.value}))} />
+              </div>
+              <div>
+                <label className="form-label">Additional Notes</label>
+                <input className="input" placeholder="MOQ, special requirements..." value={supplierContact.message} onChange={e=>setSupplierContact(f=>({...f,message:e.target.value}))} />
+              </div>
+            </div>
+            <button className="btn btn-primary" style={{marginBottom:12}} onClick={contactSupplier}>📧 Generate Supplier Message</button>
+            {supplierMsg && (
+              <div style={{background:'#0f172a',borderRadius:8,padding:14,whiteSpace:'pre-wrap',color:'#94a3b8',fontSize:'.82rem',fontFamily:'monospace',position:'relative'}}>
+                <button onClick={()=>copyText(supplierMsg)} style={{position:'absolute',top:8,right:8,background:'#334155',border:'none',color:'#94a3b8',borderRadius:6,padding:'2px 8px',cursor:'pointer',fontSize:'.72rem'}}>📋 Copy</button>
+                {supplierMsg}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Reports Panel ── */}
+      {panel === 'reports' && (
+        <div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <h3 style={{color:'#f1f5f9',margin:0}}>📊 Ecommerce Performance Reports</h3>
+            <button className="btn btn-primary" onClick={loadReport} disabled={reportLoading}>{reportLoading?'Loading...':'🔄 Generate Report'}</button>
+          </div>
+          {!report && !reportLoading && <div style={{textAlign:'center',padding:48,color:'#64748b'}}>Click "Generate Report" to load your ecommerce analytics.</div>}
+          {report && (
+            <div style={{display:'grid',gap:20}}>
+              {/* KPIs */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12}}>
+                {[
+                  ['Total Products', report.totalProducts, '#38bdf8'],
+                  ['Avg Profit Margin', `${report.avgProfitMargin}%`, '#22c55e'],
+                  ['Avg Trend Score', report.avgTrendScore, '#a78bfa'],
+                  ...Object.entries(report.statusBreakdown||{}).map(([k,v])=>[STATUS_LABEL[k]||k, v, STATUS_COLOR[k]||'#64748b']),
+                ].map(([label,val,color])=>(
+                  <div key={label} style={{background:'#1e293b',border:`1px solid ${color}44`,borderRadius:10,padding:14,textAlign:'center'}}>
+                    <div style={{color,fontSize:'1.6rem',fontWeight:800}}>{val}</div>
+                    <div style={{color:'#94a3b8',fontSize:'.75rem',marginTop:4}}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Top Profit + Trending */}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                {[
+                  ['💰 Top Profit Products', report.topProfitProducts, 'profitMargin', '%'],
+                  ['🔥 Trending Products',   report.trendingProducts,  'trendScore', '/100'],
+                ].map(([title, list, key, unit])=>(
+                  <div key={title} className="card">
+                    <h4 style={{color:'#f1f5f9',marginBottom:12,fontSize:'.95rem'}}>{title}</h4>
+                    {(list||[]).map((p,i)=>(
+                      <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid #1e293b'}}>
+                        <div>
+                          <div style={{color:'#f1f5f9',fontSize:'.82rem',fontWeight:600}}>{i+1}. {p.title}</div>
+                          <div style={{color:'#64748b',fontSize:'.72rem'}}>{p.category}</div>
+                        </div>
+                        <span style={{color:'#22c55e',fontWeight:700,fontSize:'.88rem'}}>{p[key]}{unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              {/* Low Competition */}
+              <div className="card">
+                <h4 style={{color:'#f1f5f9',marginBottom:12,fontSize:'.95rem'}}>🎯 Low Competition Opportunities</h4>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}}>
+                  {(report.lowCompetitionProducts||[]).map(p=>(
+                    <div key={p.id} style={{background:'#0f172a',borderRadius:8,padding:10}}>
+                      <div style={{color:'#f1f5f9',fontSize:'.82rem',fontWeight:600}}>{p.title}</div>
+                      <div style={{display:'flex',justifyContent:'space-between',marginTop:6}}>
+                        <span style={{color:'#22c55e',fontSize:'.78rem'}}>Margin: {p.profitMargin}%</span>
+                        <span style={{color:'#38bdf8',fontSize:'.78rem'}}>Comp: {p.competitionScore}/100</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Supplier Performance */}
+              {report.supplierPerformance?.length > 0 && (
+                <div className="card">
+                  <h4 style={{color:'#f1f5f9',marginBottom:12,fontSize:'.95rem'}}>🏭 Supplier Performance</h4>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.82rem'}}>
+                    <thead><tr>{['Supplier','Country','Rating'].map(h=><th key={h} style={{textAlign:'left',color:'#64748b',padding:'6px 8px',borderBottom:'1px solid #334155'}}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {report.supplierPerformance.map((s,i)=>(
+                        <tr key={i} style={{borderBottom:'1px solid #1e293b'}}>
+                          <td style={{color:'#f1f5f9',padding:'6px 8px'}}>{s.supplier}</td>
+                          <td style={{color:'#94a3b8',padding:'6px 8px'}}>{s.country}</td>
+                          <td style={{color:'#f59e0b',padding:'6px 8px'}}>{'⭐'.repeat(Math.round(s.rating))} {s.rating}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -546,12 +546,218 @@ def get_dropship_supplier(supplier_id: int, db: Session = Depends(get_db)):
 def ecom_stats(db: Session = Depends(get_db)):
     from sqlalchemy import func as sqlfunc
     return {
-        "total_products":  db.query(models.EcomProduct).count(),
-        "approved":        db.query(models.EcomProduct).filter(models.EcomProduct.status == "approved").count(),
-        "listed":          db.query(models.EcomProduct).filter(models.EcomProduct.status == "listed").count(),
-        "total_listings":  db.query(models.EcomListing).count(),
-        "total_suppliers": db.query(models.EcomSupplier).count(),
-        "avg_ai_score":    round(float(db.query(sqlfunc.avg(models.EcomProduct.ai_score)).scalar() or 0), 1),
+        "total_products":         db.query(models.EcomProduct).count(),
+        "approved":               db.query(models.EcomProduct).filter(models.EcomProduct.status == "approved").count(),
+        "listed":                 db.query(models.EcomProduct).filter(models.EcomProduct.status == "listed").count(),
+        "needs_approval":         db.query(models.EcomProduct).filter(models.EcomProduct.status == "needs_admin_approval").count(),
+        "published":              db.query(models.EcomProduct).filter(models.EcomProduct.status == "published").count(),
+        "total_listings":         db.query(models.EcomListing).count(),
+        "total_suppliers":        db.query(models.EcomSupplier).count(),
+        "avg_ai_score":           round(float(db.query(sqlfunc.avg(models.EcomProduct.ai_score)).scalar() or 0), 1),
+    }
+
+
+# ── Ecommerce Agent Endpoints ─────────────────────────────────────────────────
+
+def _ecom_product_to_agent_dict(p: models.EcomProduct) -> dict:
+    cost  = p.supplier_cost or 0
+    price = p.selling_price or 0
+    margin = round((price - cost) / price * 100, 1) if price > 0 else 0
+    return {
+        "id":               p.id,
+        "title":            p.product_name,
+        "category":         p.category,
+        "costPrice":        cost,
+        "salePrice":        price,
+        "profitMargin":     margin,
+        "trendScore":       p.trend_score,
+        "competitionScore": p.competition_score,
+        "rating":           p.supplier_score / 10 if p.supplier_score else 4.5,
+        "shippingDays":     7,
+        "supplierName":     p.supplier_name or "—",
+        "supplierCountry":  p.supplier_country or "—",
+        "marketplace":      p.marketplace,
+        "status":           p.status,
+        "aiScore":          p.ai_score,
+        "aiRecommendation": p.ai_recommendation or "",
+        "notes":            p.notes or "",
+    }
+
+
+_SORT_KEYS = {
+    "PRICE_LOW_TO_HIGH":  lambda p: p["salePrice"],
+    "PRICE_HIGH_TO_LOW":  lambda p: -p["salePrice"],
+    "TRENDING":           lambda p: -p["trendScore"],
+    "NEW_UPCOMING":       lambda p: -p["trendScore"],
+    "HIGH_PROFIT":        lambda p: -p["profitMargin"],
+    "BEST_RATING":        lambda p: -p["rating"],
+    "FAST_SHIPPING":      lambda p: p["shippingDays"],
+    "LOW_COMPETITION":    lambda p: p["competitionScore"],
+}
+
+
+@app.post("/ecom/agent/search", tags=["ecommerce"])
+def ecom_agent_search(payload: dict, db: Session = Depends(get_db)):
+    """Advanced product search with sort options, budget, profit margin, platform filters."""
+    q = db.query(models.EcomProduct)
+    category   = payload.get("category")
+    max_budget = payload.get("maxBudget")
+    min_profit = payload.get("minProfitMargin")
+    marketplace = payload.get("platform")
+    sort_by    = payload.get("sortBy", "TRENDING")
+    query_text = payload.get("command", "")
+
+    if category:
+        q = q.filter(models.EcomProduct.category.ilike(f"%{category}%"))
+    if marketplace:
+        q = q.filter(models.EcomProduct.marketplace.ilike(f"%{marketplace}%"))
+    if max_budget:
+        q = q.filter(models.EcomProduct.supplier_cost <= float(max_budget))
+
+    products_raw = q.order_by(models.EcomProduct.ai_score.desc()).limit(100).all()
+    products_out = [_ecom_product_to_agent_dict(p) for p in products_raw]
+
+    if min_profit:
+        products_out = [p for p in products_out if p["profitMargin"] >= float(min_profit)]
+
+    sort_fn = _SORT_KEYS.get(sort_by)
+    if sort_fn:
+        products_out.sort(key=sort_fn)
+
+    return {
+        "success":      True,
+        "command":      query_text,
+        "sortBy":       sort_by,
+        "totalProducts": len(products_out),
+        "products":     products_out,
+    }
+
+
+@app.post("/ecom/products/{product_id}/request-approval", tags=["ecommerce"])
+def ecom_request_approval(product_id: int, db: Session = Depends(get_db)):
+    """Move product status to needs_admin_approval."""
+    p = db.get(models.EcomProduct, product_id)
+    if not p:
+        raise HTTPException(404, "Product not found.")
+    p.status = "needs_admin_approval"
+    db.commit()
+    return {"success": True, "message": "Product sent to admin for approval.", "status": p.status}
+
+
+@app.post("/ecom/products/{product_id}/approve", tags=["ecommerce"])
+def ecom_approve_product(product_id: int, db: Session = Depends(get_db)):
+    """Admin approves a product."""
+    p = db.get(models.EcomProduct, product_id)
+    if not p:
+        raise HTTPException(404, "Product not found.")
+    p.status = "approved"
+    db.commit()
+    return {"success": True, "message": "Product approved!", "status": p.status}
+
+
+@app.post("/ecom/products/{product_id}/publish", tags=["ecommerce"])
+def ecom_publish_product(product_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Publish an approved product to a platform."""
+    p = db.get(models.EcomProduct, product_id)
+    if not p:
+        raise HTTPException(404, "Product not found.")
+    if p.status != "approved":
+        raise HTTPException(403, "Admin approval required before publishing.")
+    platform = payload.get("platform", p.marketplace)
+    p.status = "published"
+    p.marketplace = platform
+    db.commit()
+    return {"success": True, "message": f"Product published to {platform}!", "status": p.status}
+
+
+@app.post("/ecom/agent/customer-chat", tags=["ecommerce"])
+def ecom_customer_chat(payload: dict):
+    """AI Sales Agent responds to customer messages using Claude."""
+    customer_msg = payload.get("customerMessage", "")
+    product_ctx  = payload.get("productContext", "")
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        prompt = (
+            f"You are a friendly, helpful AI Sales Agent for an e-commerce store. "
+            f"{'Product context: ' + product_ctx if product_ctx else ''}\n"
+            f"Customer message: {customer_msg}\n\n"
+            f"Reply helpfully in 2-4 sentences. Be warm, professional, and focused on helping them buy."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        response = msg.content[0].text.strip()
+    except Exception as e:
+        response = (
+            f"Hello! Thank you for reaching out. I'm here to help you find the perfect product, "
+            f"answer questions about pricing, shipping, and availability. "
+            f"You asked: \"{customer_msg}\" — let me assist you right away!"
+        )
+    return {"success": True, "agent": "EZ-NEXUS AI Sales Agent", "response": response}
+
+
+@app.post("/ecom/agent/contact-supplier", tags=["ecommerce"])
+def ecom_contact_supplier(payload: dict, db: Session = Depends(get_db)):
+    """Generate a professional supplier outreach message."""
+    product_id   = payload.get("productId")
+    custom_note  = payload.get("message", "")
+    supplier_name = "Supplier"
+    product_name  = "your product"
+
+    if product_id:
+        p = db.get(models.EcomProduct, int(product_id))
+        if p:
+            supplier_name = p.supplier_name or "Supplier"
+            product_name  = p.product_name
+
+    msg = (
+        f"Hello {supplier_name},\n\n"
+        f"We are interested in your product: {product_name}.\n"
+        f"Please confirm the following:\n"
+        f"  • Wholesale price per unit\n"
+        f"  • Minimum Order Quantity (MOQ)\n"
+        f"  • Estimated shipping time to USA\n"
+        f"  • Return/refund policy\n"
+        f"  • Bulk discount tiers\n\n"
+        + (f"Additional notes: {custom_note}\n\n" if custom_note else "")
+        + f"We look forward to building a long-term business relationship with you.\n\nBest regards,\nEZ-NEXUS AI Procurement Team"
+    )
+    return {
+        "success": True,
+        "supplier": supplier_name,
+        "product":  product_name,
+        "preparedMessage": msg,
+    }
+
+
+@app.get("/ecom/agent/reports", tags=["ecommerce"])
+def ecom_agent_reports(db: Session = Depends(get_db)):
+    """Full ecommerce performance report."""
+    from sqlalchemy import func as sqlfunc
+    all_products = [_ecom_product_to_agent_dict(p) for p in db.query(models.EcomProduct).all()]
+
+    top_profit   = sorted(all_products, key=lambda p: -p["profitMargin"])[:5]
+    trending     = sorted(all_products, key=lambda p: -p["trendScore"])[:5]
+    low_comp     = sorted(all_products, key=lambda p: p["competitionScore"])[:5]
+    status_breakdown = {}
+    for p in all_products:
+        status_breakdown[p["status"]] = status_breakdown.get(p["status"], 0) + 1
+
+    return {
+        "success": True,
+        "totalProducts":     len(all_products),
+        "statusBreakdown":   status_breakdown,
+        "topProfitProducts": top_profit,
+        "trendingProducts":  trending,
+        "lowCompetitionProducts": low_comp,
+        "supplierPerformance": [
+            {"supplier": p["supplierName"], "country": p["supplierCountry"], "rating": p["rating"]}
+            for p in all_products if p["supplierName"] != "—"
+        ][:10],
+        "avgProfitMargin": round(sum(p["profitMargin"] for p in all_products) / len(all_products), 1) if all_products else 0,
+        "avgTrendScore":   round(sum(p["trendScore"] for p in all_products) / len(all_products), 1) if all_products else 0,
     }
 
 
