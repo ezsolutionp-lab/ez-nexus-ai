@@ -70,11 +70,11 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS — allow the Vite dev server and any same-origin frontend
+# CORS — allow all origins (JWT in headers, no cookies needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
