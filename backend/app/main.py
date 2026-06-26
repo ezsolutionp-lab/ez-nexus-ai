@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Request
+from fastapi import BackgroundTasks, FastAPI, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -961,71 +961,100 @@ def delete_supplier_product(product_id: int, db: Session = Depends(get_db)):
 
 # ── Video Ad Generator ────────────────────────────────────────────────────────
 
+# In-memory job store  {job_id: {status, progress, download_url, error, scenes}}
+_VIDEO_JOBS: dict = {}
+
+
+def _build_scenes(brand_name: str, script: str, topic: str, scene_count: int) -> list:
+    """Use Claude to plan scenes. Falls back to defaults on any error."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        prompt = (
+            f"Break this ad script into exactly {scene_count} video scenes for brand '{brand_name}'. "
+            f"Topic: {topic or script[:100]}\n\nScript: {script}\n\n"
+            f"Return ONLY a JSON array of {scene_count} objects each with: "
+            f"tag (Hook/Problem/Solution/Proof/CTA), headline (max 8 words), "
+            f"subtext (max 15 words), narration (1-2 sentences), duration (3-5 number), "
+            f"is_cta (bool, true only last scene), cta_text (string, only last scene). "
+            f"Return ONLY the JSON array."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=1200,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip()
+        return json.loads(raw[raw.find('['):raw.rfind(']') + 1])
+    except Exception as e:
+        logger.warning("Claude scene planning failed, using defaults: %s", e)
+    words = script.split()
+    return [
+        {"tag": "Hook",     "headline": " ".join(words[:6]) if len(words) >= 6 else script[:40],
+         "subtext": "Get ready to transform your business", "narration": script[:120], "duration": 4, "is_cta": False},
+        {"tag": "Problem",  "headline": "Struggling to grow?",
+         "subtext": "You're not alone", "narration": "Many businesses face the same challenges every day.", "duration": 3, "is_cta": False},
+        {"tag": "Solution", "headline": f"{brand_name} has the answer",
+         "subtext": "AI-powered tools built for your success", "narration": f"{brand_name} provides everything you need.", "duration": 4, "is_cta": False},
+        {"tag": "CTA",      "headline": "Start today",
+         "subtext": "Join thousands of successful businesses",
+         "narration": f"Visit {brand_name} now and start your free trial.", "duration": 4, "is_cta": True, "cta_text": "Get Started Free"},
+    ][:scene_count]
+
+
+def _video_background_job(job_id: str, brand_name: str, script: str, palette: str, topic: str, duration: str):
+    """Runs entirely in a background thread — safe to block."""
+    import asyncio
+    from .services.video_generator import generate_video_ad
+    try:
+        _VIDEO_JOBS[job_id]["progress"] = "Planning scenes with Claude AI..."
+        dur_sec = int(duration) if duration.isdigit() else 30
+        scene_count = max(2, min(8, dur_sec // 12))
+        scenes = _build_scenes(brand_name, script, topic, scene_count)
+
+        _VIDEO_JOBS[job_id]["progress"] = "Rendering frames & generating voiceover..."
+        result = generate_video_ad(scenes, brand_name, palette, job_id)
+
+        _VIDEO_JOBS[job_id].update({
+            "status": "ready",
+            "progress": "Done!",
+            "video_id": result["video_id"],
+            "download_url": f"/video/download/{result['video_id']}",
+            "stream_url": f"/video/stream/{result['video_id']}",
+            "scenes": result["scenes"],
+            "message": f"Video ad ready — {result['scenes']} scenes",
+        })
+    except Exception as e:
+        logger.error("Video job %s failed: %s", job_id, e)
+        _VIDEO_JOBS[job_id].update({"status": "error", "error": str(e)})
+
+
 @app.post("/video/generate", tags=["video"])
 async def generate_video(
+    background_tasks: BackgroundTasks,
     brand_name: str = Form(...),
     script: str = Form(...),
     palette: str = Form("dark_blue"),
     topic: str = Form(""),
     duration: str = Form("30"),
 ):
-    """Generate a full MP4 video ad from a script using AI scene planning."""
-    import json, asyncio
-    from .services.video_generator import generate_video_ad
+    """Queue a video ad job and return job_id immediately. Poll /video/status/{job_id}."""
+    import asyncio
+    job_id = str(uuid.uuid4())[:12]
+    _VIDEO_JOBS[job_id] = {"status": "processing", "progress": "Queued..."}
+    background_tasks.add_task(
+        asyncio.get_event_loop().run_in_executor,
+        None, _video_background_job, job_id, brand_name, script, palette, topic, duration
+    )
+    return {"job_id": job_id, "status": "processing"}
 
-    # Calculate scene count from duration
-    dur_sec = int(duration) if duration.isdigit() else 30
-    scene_count = max(2, min(10, dur_sec // 12))
 
-    # Use Claude to break the script into video scenes
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
-        prompt = (
-            f"Break this ad script into exactly {scene_count} video scenes for brand '{brand_name}'. Topic: {topic or script[:100]}\n\n"
-            f"Script: {script}\n\n"
-            f"Return ONLY a JSON array of {scene_count} objects, each with:\n"
-            f"- tag: string (Hook/Problem/Solution/Proof/CTA)\n"
-            f"- headline: string (max 8 words, punchy)\n"
-            f"- subtext: string (max 15 words supporting text)\n"
-            f"- narration: string (what AI voice will say, 1-2 sentences)\n"
-            f"- duration: number (3-5 seconds)\n"
-            f"- is_cta: boolean (true only for last scene)\n"
-            f"- cta_text: string (e.g. 'Shop Now', 'Learn More', only for last scene)\n"
-            f"Return ONLY the JSON array, no other text."
-        )
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        scenes_text = msg.content[0].text.strip()
-        # Extract JSON array from response
-        start = scenes_text.find('[')
-        end = scenes_text.rfind(']') + 1
-        scenes = json.loads(scenes_text[start:end])
-    except Exception as e:
-        logger.warning("Claude scene planning failed, using default scenes: %s", e)
-        # Fallback scenes
-        words = script.split()
-        scenes = [
-            {"tag": "Hook",     "headline": " ".join(words[:6]) if len(words) >= 6 else script[:40], "subtext": "Get ready to transform your business", "narration": script[:120], "duration": 4, "is_cta": False},
-            {"tag": "Problem",  "headline": "Struggling to grow?", "subtext": "You're not alone — we've been there", "narration": "Many businesses face the same challenges every day.", "duration": 3, "is_cta": False},
-            {"tag": "Solution", "headline": f"{brand_name} has the answer", "subtext": "AI-powered tools built for your success", "narration": f"{brand_name} provides everything you need to succeed.", "duration": 4, "is_cta": False},
-            {"tag": "Proof",    "headline": "Results that speak", "subtext": "Trusted by thousands of businesses", "narration": "Our customers see real results from day one.", "duration": 3, "is_cta": False},
-            {"tag": "CTA",      "headline": "Start today", "subtext": "Join thousands of successful businesses", "narration": f"Visit {brand_name} now and start your free trial.", "duration": 4, "is_cta": True, "cta_text": "Get Started Free"},
-        ]
-
-    # Generate the video in a thread (sync function — won't block the event loop)
-    result = await asyncio.to_thread(generate_video_ad, scenes, brand_name, palette)
-
-    return {
-        "video_id": result["video_id"],
-        "download_url": f"/video/download/{result['video_id']}",
-        "scenes": result["scenes"],
-        "status": result["status"],
-        "message": f"Video ad generated with {result['scenes']} scenes!",
-    }
+@app.get("/video/status/{job_id}", tags=["video"])
+def video_status(job_id: str):
+    """Poll this endpoint to check video generation progress."""
+    job = _VIDEO_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or expired.")
+    return job
 
 
 @app.get("/video/download/{video_id}", tags=["video"])
