@@ -48,7 +48,7 @@ rapidfuzz>=3.10.0
 openai>=1.57.0
 
 # Video Ad Generator — in-house, no third-party video APIs
-moviepy>=1.0.3
+# moviepy removed — we use imageio-ffmpeg + subprocess directly (more reliable on Linux)
 gTTS>=2.5.0
 imageio>=2.34.0
 imageio-ffmpeg>=0.4.9

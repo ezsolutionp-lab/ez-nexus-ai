@@ -1016,21 +1016,8 @@ async def generate_video(
             {"tag": "CTA",      "headline": "Start today", "subtext": "Join thousands of successful businesses", "narration": f"Visit {brand_name} now and start your free trial.", "duration": 4, "is_cta": True, "cta_text": "Get Started Free"},
         ]
 
-    # Generate the video
-    try:
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: __import__('asyncio').get_event_loop().run_until_complete(
-                generate_video_ad(scenes, brand_name, palette)
-            )
-        )
-    except Exception:
-        import asyncio as _asyncio
-        result = await _asyncio.to_thread(
-            lambda: None
-        )
-        # Direct async call
-        result = await generate_video_ad(scenes, brand_name, palette)
+    # Generate the video in a thread (sync function — won't block the event loop)
+    result = await asyncio.to_thread(generate_video_ad, scenes, brand_name, palette)
 
     return {
         "video_id": result["video_id"],
