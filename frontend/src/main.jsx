@@ -2585,7 +2585,7 @@ function AgentsTab() {
           {loading ? <Spinner /> : (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:14 }}>
               {roster.map((a, i) => {
-                const agentKey = a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'')
+                const agentKey = a.key || a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'').replace(/_agent$/,'')
                 const isActive = a.status === 'active'
                 return (
                 <div key={i}
@@ -2620,7 +2620,7 @@ function AgentsTab() {
             <select className="input" value={runForm.agent_key} onChange={e => setRunForm(f => ({...f, agent_key: e.target.value}))} required>
               <option value="">Select Agent *</option>
               {roster.filter(a => a.status === 'active').map(a => (
-                <option key={a.name} value={a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'')}>{a.icon} {a.name}</option>
+                <option key={a.name} value={a.key || a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'').replace(/_agent$/,'')}>{a.icon} {a.name}</option>
               ))}
             </select>
             <input className="input" placeholder="Task Type (e.g. triage, qualify_lead, generate_copy)" value={runForm.task_type} onChange={e => setRunForm(f => ({...f, task_type: e.target.value}))} required />

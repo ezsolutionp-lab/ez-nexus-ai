@@ -963,9 +963,9 @@ def delete_supplier_product(product_id: int, db: Session = Depends(get_db)):
 
 @app.get("/agents/roster", tags=["agents"])
 def get_agent_roster():
-    """List all 13 specialized agents with their status."""
+    """List all agents with their registry key included."""
     from .agents import AGENT_REGISTRY
-    return [agent.to_dict() for agent in AGENT_REGISTRY.values()]
+    return [{"key": key, **agent.to_dict()} for key, agent in AGENT_REGISTRY.items()]
 
 
 @app.post("/agents/run", tags=["agents"])
