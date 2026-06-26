@@ -124,11 +124,50 @@ class WebsiteBuilderAgent(BaseAgent):
     name = "Website Builder Agent"
     description = "Generates landing pages, booking widgets, and micro-sites"
     category = "technology"
-    status = "coming_soon"
+    status = "active"
     icon = "🌐"
 
     async def handle(self, task_type: str, payload: dict, db: Any = None) -> dict:
-        return {"detail": "Website Builder Agent — coming soon", "task_type": task_type}
+        business = payload.get("business_name", "Your Business")
+        industry = payload.get("industry", "general")
+        goal = payload.get("goal", "generate leads")
+
+        if task_type == "build_landing_page":
+            result = await _claude(
+                f"Create a complete landing page copy for '{business}' in the {industry} industry. Goal: {goal}. "
+                f"Include: headline, sub-headline, 3 value propositions, social proof section, CTA button text, and footer tagline. "
+                f"Format as JSON with keys: headline, sub_headline, value_props (list of 3), social_proof, cta_text, tagline.",
+                system="You are an expert web copywriter. Always respond with valid JSON."
+            )
+            return {"page_copy": result, "business": business, "task": "landing_page"}
+
+        if task_type == "build_booking_widget":
+            result = await _claude(
+                f"Design a booking widget flow for '{business}'. Services offered: {payload.get('services', 'consultations')}. "
+                f"Create: widget title, step-by-step booking instructions (3 steps), confirmation message, and reminder SMS text. "
+                f"Format as JSON with keys: widget_title, steps (list), confirmation_msg, sms_reminder.",
+                system="You are a UX designer specializing in booking systems. Always respond with valid JSON."
+            )
+            return {"widget_config": result, "business": business, "task": "booking_widget"}
+
+        if task_type == "build_microsite":
+            topic = payload.get("topic", business)
+            result = await _claude(
+                f"Create a complete micro-site outline for '{topic}'. Include: page title, meta description, "
+                f"hero section copy, 3 feature sections (each with title + description), testimonials (2), and contact section. "
+                f"Format as JSON with keys: title, meta_desc, hero, features (list), testimonials (list), contact_cta.",
+                system="You are a web content strategist. Always respond with valid JSON."
+            )
+            return {"microsite": result, "topic": topic, "task": "microsite"}
+
+        # Default — generate full website plan
+        result = await _claude(
+            f"Create a website strategy for '{business}' in {industry}. Goal: {goal}. "
+            f"Provide: recommended pages, key messages per page, SEO keywords, and conversion tips. "
+            f"Format as JSON with keys: pages (list with name+purpose), key_messages, seo_keywords (list), conversion_tips (list).",
+            system="You are a digital strategist. Always respond with valid JSON."
+        )
+        return {"website_plan": result, "business": business}
 
 
 # ── 7. Content & Video Agent ──────────────────────────────────────────────────
@@ -137,16 +176,61 @@ class ContentVideoAgent(BaseAgent):
     name = "Content & Video Agent"
     description = "Scripts, produces, and distributes short-form video content"
     category = "media"
-    status = "coming_soon"
+    status = "active"
     icon = "🎬"
 
     async def handle(self, task_type: str, payload: dict, db: Any = None) -> dict:
+        topic = payload.get("topic", "our business")
+        brand = payload.get("brand_name", "our brand")
+        audience = payload.get("target_audience", "general audience")
+
         if task_type == "write_script":
-            prompt = (
-                f"Write a 30-second video script for: {payload.get('topic', 'our business')}"
+            duration = payload.get("duration", "30")
+            result = await _claude(
+                f"Write a compelling {duration}-second video script for '{brand}' about: {topic}. Target audience: {audience}. "
+                f"Include: hook (first 3 seconds), main message, call-to-action. "
+                f"Format as JSON with keys: hook, main_message, cta, full_script, estimated_word_count.",
+                system="You are an expert video scriptwriter for social media. Always respond with valid JSON."
             )
-            return {"script": await _claude(prompt)}
-        return {"detail": "Content & Video Agent — coming soon"}
+            return {"script": result, "topic": topic, "duration_sec": duration}
+
+        if task_type == "generate_social_posts":
+            platforms = payload.get("platforms", "Instagram, TikTok, LinkedIn")
+            result = await _claude(
+                f"Create social media posts for '{brand}' about: {topic}. Platforms: {platforms}. Audience: {audience}. "
+                f"Write one optimized post per platform with hashtags and emojis. "
+                f"Format as JSON with platform names as keys, each having: caption, hashtags (list), best_time_to_post.",
+                system="You are a social media content expert. Always respond with valid JSON."
+            )
+            return {"social_posts": result, "platforms": platforms, "topic": topic}
+
+        if task_type == "content_calendar":
+            weeks = payload.get("weeks", 4)
+            result = await _claude(
+                f"Create a {weeks}-week content calendar for '{brand}' in the {payload.get('industry','general')} industry. "
+                f"Include daily content ideas, themes per week, content types (video/post/story/reel), and engagement tips. "
+                f"Format as JSON with keys: weekly_themes (list), daily_schedule (Mon-Sun with content_type+topic), tips (list).",
+                system="You are a content marketing strategist. Always respond with valid JSON."
+            )
+            return {"content_calendar": result, "weeks": weeks, "brand": brand}
+
+        if task_type == "write_video_description":
+            result = await _claude(
+                f"Write a YouTube/TikTok video description for '{brand}' — Video topic: {topic}. "
+                f"Include: engaging first line, key points covered, timestamps (3), hashtags, and subscribe CTA. "
+                f"Format as JSON with keys: first_line, key_points (list), timestamps (list), hashtags (list), cta.",
+                system="You are a YouTube SEO and content expert. Always respond with valid JSON."
+            )
+            return {"video_description": result, "topic": topic}
+
+        # Default — full content strategy
+        result = await _claude(
+            f"Create a content strategy for '{brand}' targeting {audience} about: {topic}. "
+            f"Include: content pillars (3), video ideas (5), posting frequency, best platforms, and growth tips. "
+            f"Format as JSON with keys: pillars (list), video_ideas (list), posting_schedule, best_platforms (list), growth_tips (list).",
+            system="You are a content strategy expert. Always respond with valid JSON."
+        )
+        return {"content_strategy": result, "brand": brand, "topic": topic}
 
 
 # ── 8. Patient Outreach Agent ─────────────────────────────────────────────────
