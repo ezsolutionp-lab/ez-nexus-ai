@@ -4098,7 +4098,6 @@ function VideoAdTab() {
               {!isAdmin && <p style={{ color:'#64748b', fontSize:'.72rem', margin:'6px 0 0' }}>💡 Admin accounts have unlimited free access to all durations.</p>}
             </div>
           </div>
-        </div>
 
           {/* Right — script */}
           <div style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, padding:24 }}>
