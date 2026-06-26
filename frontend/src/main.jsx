@@ -3995,18 +3995,21 @@ function VideoAdTab() {
     if (!form.script || !form.brand_name) { setError('Script and brand name are required'); return }
     setError(''); setGenerating(true); setStep('generating')
     const messages = [
-      'Analyzing script with Claude AI...',
-      'Planning 5 video scenes...',
-      'Rendering scene frames...',
-      'Generating AI voiceover narration...',
-      'Assembling video with transitions...',
-      'Encoding final MP4...',
-      'Almost done...'
+      '⏳ Waking up server (Render free tier — up to 60s)...',
+      '🤖 Analyzing script with Claude AI...',
+      '🎬 Planning video scenes...',
+      '🖼️ Rendering scene frames...',
+      '🎙️ Generating AI voiceover...',
+      '🎞️ Assembling video with FFmpeg...',
+      '📦 Encoding final MP4...',
+      '✅ Almost done — finalizing...'
     ]
     let mi = 0
+    setProgress(messages[0])
     const interval = setInterval(() => {
-      setProgress(messages[Math.min(mi++, messages.length - 1)])
-    }, 4000)
+      mi = Math.min(mi + 1, messages.length - 1)
+      setProgress(messages[mi])
+    }, 8000)
     try {
       const fd = new FormData()
       fd.append('brand_name', form.brand_name)
@@ -4016,15 +4019,33 @@ function VideoAdTab() {
       fd.append('duration', form.duration)
       const API_URL = (typeof API !== 'undefined' ? API : null) || import.meta?.env?.VITE_API_URL || 'http://localhost:8000'
       const token = localStorage.getItem('ez_token')
-      const res = await fetch(`${API_URL}/video/generate`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd
-      })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Video generation failed') }
+
+      // Wake up the backend first — Render free tier sleeps after inactivity
+      try {
+        setProgress('⏳ Waking up server (may take up to 60 seconds)...')
+        await fetch(`${API_URL}/`, { signal: AbortSignal.timeout(90000) })
+      } catch (_) { /* ignore — just a warm-up ping */ }
+
+      // 5-minute timeout for video generation (wake up + processing)
+      const controller = new AbortController()
+      const tid = setTimeout(() => controller.abort(), 300000)
+      let res
+      try {
+        res = await fetch(`${API_URL}/video/generate`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: fd,
+          signal: controller.signal
+        })
+      } finally { clearTimeout(tid) }
+
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || `Server error ${res.status}`) }
       const data = await res.json()
       setResult(data); setStep('done')
-    } catch (e) { setError(e.message); setStep('form') }
+    } catch (e) {
+      const msg = e.name === 'AbortError' ? 'Request timed out (5 min). Try a shorter duration.' : e.message
+      setError(msg); setStep('form')
+    }
     finally { clearInterval(interval); setGenerating(false) }
   }
 
