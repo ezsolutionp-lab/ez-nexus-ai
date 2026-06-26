@@ -5059,7 +5059,7 @@ function EcommerceTab() {
             <div>
               <h3 style={{color:'#f1f5f9',margin:'0 0 4px',fontSize:'1.2rem',fontWeight:800}}>🏭 Dropship & Wholesale Supplier Directory</h3>
               <p style={{color:'#64748b',margin:0,fontSize:'.88rem'}}>
-                {dsSuppliers.length} vetted suppliers — USA, EU, Asia, India &amp; Global. Filter by region, type, and shipping.
+                {dsLoading ? 'Loading suppliers...' : dsSuppliers.length > 0 ? `${dsSuppliers.length} suppliers found` : 'No suppliers match — try clearing some filters'} · {ecomStats.directory_suppliers || 45}+ vetted suppliers total · USA, EU, Asia, India &amp; Global
               </p>
             </div>
           </div>
@@ -5101,7 +5101,18 @@ function EcommerceTab() {
             </button>
           </div>
 
-          {dsLoading && <div style={{textAlign:'center',color:'#64748b',padding:24}}>Loading suppliers...</div>}
+          {dsLoading && <div style={{textAlign:'center',color:'#64748b',padding:24}}>🔄 Loading suppliers...</div>}
+
+          {!dsLoading && dsSuppliers.length === 0 && (
+            <div style={{textAlign:'center',padding:40,background:'#1e293b',borderRadius:12,border:'1px solid #334155'}}>
+              <div style={{fontSize:'2.5rem',marginBottom:12}}>🔍</div>
+              <h4 style={{color:'#f1f5f9',marginBottom:8}}>No suppliers match your current filters</h4>
+              <p style={{color:'#64748b',fontSize:'.88rem',marginBottom:16}}>
+                Try: clearing the search text · changing the region · removing the USA Warehouse filter · or searching just one word like "Pet" instead of "Pets Food"
+              </p>
+              <button className="btn" style={{background:'#334155',color:'#f1f5f9'}} onClick={clearDsFilters}>✕ Clear All Filters</button>
+            </div>
+          )}
 
           {/* Supplier Detail Modal */}
           {dsSelected && (

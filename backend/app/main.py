@@ -525,12 +525,19 @@ def list_dropship_directory(
     if dropship_ready is not None:
         q = q.filter(models.DropshipDirectory.dropship_ready == dropship_ready)
     if search:
-        like = f"%{search}%"
-        q = q.filter(
-            models.DropshipDirectory.name.ilike(like) |
-            models.DropshipDirectory.categories.ilike(like) |
-            models.DropshipDirectory.description.ilike(like)
-        )
+        from sqlalchemy import or_
+        # Split into words so "Pets Food" matches suppliers with "Pet" or "Food"
+        words = [w.strip() for w in search.strip().split() if w.strip()]
+        conditions = []
+        for word in words:
+            like = f"%{word}%"
+            conditions.extend([
+                models.DropshipDirectory.name.ilike(like),
+                models.DropshipDirectory.categories.ilike(like),
+                models.DropshipDirectory.description.ilike(like),
+            ])
+        if conditions:
+            q = q.filter(or_(*conditions))
     return q.order_by(models.DropshipDirectory.rating.desc()).offset(skip).limit(limit).all()
 
 
@@ -553,6 +560,7 @@ def ecom_stats(db: Session = Depends(get_db)):
         "published":              db.query(models.EcomProduct).filter(models.EcomProduct.status == "published").count(),
         "total_listings":         db.query(models.EcomListing).count(),
         "total_suppliers":        db.query(models.EcomSupplier).count(),
+        "directory_suppliers":    db.query(models.DropshipDirectory).filter(models.DropshipDirectory.is_active == True).count(),
         "avg_ai_score":           round(float(db.query(sqlfunc.avg(models.EcomProduct.ai_score)).scalar() or 0), 1),
     }
 
