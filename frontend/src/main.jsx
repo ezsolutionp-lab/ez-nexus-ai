@@ -2614,21 +2614,72 @@ function AgentsTab() {
 
       {/* Run task */}
       {panel === 'run' && (
-        <div className="card" style={{ maxWidth:600 }}>
-          <h3 style={{ marginBottom:12 }}>⚡ Dispatch Agent Task</h3>
-          <form onSubmit={runTask} style={{ display:'grid', gap:10 }}>
-            <select className="input" value={runForm.agent_key} onChange={e => setRunForm(f => ({...f, agent_key: e.target.value}))} required>
+        <div className="card" style={{ maxWidth:640 }}>
+          <h3 style={{ marginBottom:4 }}>⚡ Dispatch Agent Task</h3>
+          <p style={{ color:'#64748b', fontSize:'.82rem', marginBottom:14 }}>Select an agent, pick a task, fill in the fields — no coding needed.</p>
+          <form onSubmit={runTask} style={{ display:'grid', gap:12 }}>
+            <select className="input" value={runForm.agent_key} onChange={e => setRunForm(f => ({...f, agent_key: e.target.value, task_type:'', payload_json:'{}'}))} required>
               <option value="">Select Agent *</option>
               {roster.filter(a => a.status === 'active').map(a => (
                 <option key={a.name} value={a.key || a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'').replace(/_agent$/,'')}>{a.icon} {a.name}</option>
               ))}
             </select>
-            <input className="input" placeholder="Task Type (e.g. triage, qualify_lead, generate_copy)" value={runForm.task_type} onChange={e => setRunForm(f => ({...f, task_type: e.target.value}))} required />
-            <div>
-              <label style={{ color:'#94a3b8', fontSize:'.8rem' }}>Payload (JSON)</label>
-              <textarea className="input" style={{ fontFamily:'monospace', fontSize:'.8rem', minHeight:80 }} value={runForm.payload_json} onChange={e => setRunForm(f => ({...f, payload_json: e.target.value}))} required />
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={running}>{running ? '🔄 Running…' : '⚡ Run Task'}</button>
+
+            {/* Smart task type selector based on agent */}
+            {runForm.agent_key && (() => {
+              const taskMap = {
+                content_video: ['write_script','generate_social_posts','content_calendar','write_video_description'],
+                website_builder: ['build_landing_page','build_booking_widget','build_microsite'],
+                marketing: ['create_campaign','write_email','social_media_post'],
+                sales: ['qualify_lead','score_lead','write_proposal'],
+                appointment: ['book','reschedule','cancel','list'],
+                call_center: ['triage','summarize','escalate'],
+                billing_support: ['check_invoice','dispute','payment_plan'],
+                recruitment: ['generate_job_description','screen_candidate','schedule_interview'],
+              }
+              const tasks = taskMap[runForm.agent_key] || ['run_task','analyze','generate','process']
+              return (
+                <select className="input" value={runForm.task_type} onChange={e => setRunForm(f => ({...f, task_type: e.target.value}))} required>
+                  <option value="">Select Task Type *</option>
+                  {tasks.map(t => <option key={t} value={t}>{t.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}</option>)}
+                </select>
+              )
+            })()}
+
+            {/* Smart payload fields based on agent+task */}
+            {runForm.agent_key && runForm.task_type && (() => {
+              const fields = {
+                'content_video:write_script': [{k:'topic',l:'Video Topic *',p:'e.g. Running shoes that help you win'},{k:'brand_name',l:'Brand Name',p:'e.g. Nike'},{k:'target_audience',l:'Target Audience',p:'e.g. Athletes aged 18-35'},{k:'duration',l:'Duration (seconds)',p:'30'}],
+                'content_video:generate_social_posts': [{k:'topic',l:'Post Topic *',p:'e.g. New shoe launch'},{k:'brand_name',l:'Brand Name',p:'e.g. Nike'},{k:'platforms',l:'Platforms',p:'Instagram, TikTok, LinkedIn'}],
+                'content_video:content_calendar': [{k:'brand_name',l:'Brand Name *',p:'e.g. Nike'},{k:'industry',l:'Industry',p:'e.g. Footwear'},{k:'weeks',l:'Weeks',p:'4'}],
+                'content_video:write_video_description': [{k:'topic',l:'Video Topic *',p:'e.g. Running tips'},{k:'brand_name',l:'Brand Name',p:'e.g. Nike'}],
+                'website_builder:build_landing_page': [{k:'business_name',l:'Business Name *',p:'e.g. Shoes ADD'},{k:'industry',l:'Industry',p:'e.g. Footwear'},{k:'goal',l:'Goal',p:'e.g. generate leads'}],
+                'website_builder:build_booking_widget': [{k:'business_name',l:'Business Name *',p:'e.g. Shoes ADD'},{k:'services',l:'Services',p:'e.g. Shoe fitting, custom orders'}],
+                'website_builder:build_microsite': [{k:'business_name',l:'Business Name *',p:'e.g. Shoes ADD'},{k:'topic',l:'Topic / Campaign',p:'e.g. Summer running collection'}],
+                'sales:qualify_lead': [{k:'company',l:'Company *',p:'e.g. Acme Corp'},{k:'source',l:'Lead Source',p:'e.g. website'},{k:'notes',l:'Notes',p:'e.g. Interested in bulk order'}],
+                'sales:score_lead': [{k:'company',l:'Company *',p:'e.g. Acme Corp'},{k:'source',l:'Lead Source',p:'e.g. referral'},{k:'notes',l:'Notes',p:''}],
+                'marketing:create_campaign': [{k:'product',l:'Product *',p:'e.g. Running Shoes'},{k:'audience',l:'Audience',p:'e.g. Athletes'},{k:'budget',l:'Budget',p:'e.g. $500'}],
+                'recruitment:generate_job_description': [{k:'title',l:'Job Title *',p:'e.g. Sales Manager'},{k:'department',l:'Department',p:'e.g. Sales'},{k:'requirements',l:'Key Requirements',p:'e.g. 3 years experience'}],
+              }
+              const key = `${runForm.agent_key}:${runForm.task_type}`
+              const agentFields = fields[key] || [{k:'input',l:'Input *',p:'Describe what you need the agent to do'},{k:'context',l:'Additional Context',p:'Any extra details'}]
+              const vals = (() => { try { return JSON.parse(runForm.payload_json) } catch { return {} } })()
+              return (
+                <div style={{ display:'grid', gap:8 }}>
+                  {agentFields.map(f => (
+                    <div key={f.k}>
+                      <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:3 }}>{f.l}</label>
+                      <input className="input" placeholder={f.p} value={vals[f.k]||''} onChange={e => {
+                        const newVals = {...vals, [f.k]: e.target.value}
+                        setRunForm(rf => ({...rf, payload_json: JSON.stringify(newVals)}))
+                      }} />
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
+            <button type="submit" className="btn btn-primary" disabled={running} style={{ marginTop:4 }}>{running ? '🔄 Running…' : '⚡ Run Task'}</button>
           </form>
           {runResult && (
             <div style={{ marginTop:20, background:'#0f172a', border:'1px solid #0f766e', borderRadius:8, padding:16 }}>
