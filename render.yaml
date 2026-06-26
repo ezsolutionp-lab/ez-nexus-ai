@@ -4,7 +4,7 @@ services:
     name: ez-nexus-ai-backend
     runtime: python
     rootDir: backend
-    buildCommand: apt-get install -y ffmpeg && pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
