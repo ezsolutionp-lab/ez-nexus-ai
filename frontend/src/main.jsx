@@ -2584,20 +2584,29 @@ function AgentsTab() {
         <div>
           {loading ? <Spinner /> : (
             <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:14 }}>
-              {roster.map((a, i) => (
-                <div key={i} style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:10, padding:16, position:'relative', overflow:'hidden' }}>
+              {roster.map((a, i) => {
+                const agentKey = a.name.toLowerCase().replace(/[\s&]+/g,'_').replace(/[^a-z_]/g,'')
+                const isActive = a.status === 'active'
+                return (
+                <div key={i}
+                  onClick={() => { if (isActive) { setRunForm(f => ({...f, agent_key: agentKey})); setPanel('run') } }}
+                  style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:10, padding:16, position:'relative', overflow:'hidden', cursor: isActive ? 'pointer' : 'default', transition:'border-color .2s, transform .15s' }}
+                  onMouseEnter={e => { if (isActive) { e.currentTarget.style.borderColor='#38bdf8'; e.currentTarget.style.transform='translateY(-2px)' }}}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor='#334155'; e.currentTarget.style.transform='none' }}>
                   <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background: CATEGORY_COLOR[a.category] || '#64748b' }} />
                   <div style={{ fontSize:'1.8rem', marginBottom:6 }}>{a.icon}</div>
                   <div style={{ fontWeight:600, color:'#f1f5f9', marginBottom:4, fontSize:'.9rem' }}>{a.name}</div>
                   <div style={{ fontSize:'.75rem', color:'#94a3b8', marginBottom:8 }}>{a.description}</div>
-                  <div style={{ display:'flex', gap:6 }}>
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                     <span style={{ background: CATEGORY_COLOR[a.category] || '#64748b', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:'.68rem' }}>{a.category}</span>
                     <span style={{ background: a.status === 'active' ? '#22c55e' : a.status === 'maintenance' ? '#f59e0b' : '#334155', color:'#fff', padding:'2px 8px', borderRadius:12, fontSize:'.68rem' }}>
                       {a.status === 'active' ? '✅ Active' : a.status === 'coming_soon' ? '🔜 Soon' : '🔧 Maintenance'}
                     </span>
+                    {isActive && <span style={{ background:'#1e4d72', color:'#38bdf8', padding:'2px 8px', borderRadius:12, fontSize:'.68rem' }}>▶ Run Task</span>}
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
