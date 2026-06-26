@@ -2683,14 +2683,26 @@ function AgentsTab() {
           </form>
           {runResult && (
             <div style={{ marginTop:20, background:'#0f172a', border:'1px solid #0f766e', borderRadius:8, padding:16 }}>
-              <div style={{ display:'flex', gap:8, marginBottom:8, flexWrap:'wrap' }}>
-                <span style={{ background: runResult.status === 'success' ? '#22c55e' : '#ef4444', color:'#fff', padding:'2px 10px', borderRadius:12, fontSize:'.75rem' }}>{runResult.status}</span>
+              <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
+                <span style={{ background: runResult.status === 'success' ? '#22c55e' : '#ef4444', color:'#fff', padding:'3px 12px', borderRadius:12, fontSize:'.75rem', fontWeight:700 }}>{runResult.status === 'success' ? '✅ Success' : '❌ Error'}</span>
                 <span style={{ color:'#64748b', fontSize:'.75rem' }}>{runResult.duration_ms}ms</span>
                 {runResult.task_id && <span style={{ color:'#64748b', fontSize:'.75rem' }}>Task #{runResult.task_id}</span>}
+                <button onClick={() => navigator.clipboard.writeText(JSON.stringify(runResult.result || runResult.error, null, 2))} style={{ marginLeft:'auto', background:'#1e293b', color:'#38bdf8', border:'1px solid #334155', borderRadius:6, padding:'3px 10px', fontSize:'.72rem', cursor:'pointer' }}>📋 Copy</button>
               </div>
-              <pre style={{ color:'#e2e8f0', whiteSpace:'pre-wrap', fontSize:'.8rem', fontFamily:'inherit', margin:0 }}>
-                {JSON.stringify(runResult.result || runResult.error, null, 2)}
-              </pre>
+              {runResult.status === 'success' && runResult.result
+                ? Object.entries(runResult.result).map(([k, v]) => (
+                  <div key={k} style={{ marginBottom:12 }}>
+                    <div style={{ color:'#38bdf8', fontSize:'.72rem', fontWeight:700, textTransform:'uppercase', letterSpacing:'.05em', marginBottom:4 }}>{k.replace(/_/g,' ')}</div>
+                    {Array.isArray(v)
+                      ? <ul style={{ margin:0, paddingLeft:18 }}>{v.map((item,i) => <li key={i} style={{ color:'#e2e8f0', fontSize:'.82rem', marginBottom:3 }}>{typeof item === 'object' ? JSON.stringify(item) : item}</li>)}</ul>
+                      : typeof v === 'object'
+                        ? <pre style={{ color:'#e2e8f0', whiteSpace:'pre-wrap', fontSize:'.78rem', margin:0, background:'#0a0f1a', padding:8, borderRadius:4 }}>{JSON.stringify(v, null, 2)}</pre>
+                        : <p style={{ color:'#e2e8f0', fontSize:'.82rem', margin:0, lineHeight:1.6 }}>{String(v).replace(/\\n/g,'\n').replace(/\\"/g,'"')}</p>
+                    }
+                  </div>
+                ))
+                : <pre style={{ color:'#ef4444', whiteSpace:'pre-wrap', fontSize:'.8rem', margin:0 }}>{String(runResult.error || '')}</pre>
+              }
             </div>
           )}
         </div>
