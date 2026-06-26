@@ -959,6 +959,108 @@ def delete_supplier_product(product_id: int, db: Session = Depends(get_db)):
     return {"detail": f"Product {product_id} deleted."}
 
 
+# ── Video Ad Generator ────────────────────────────────────────────────────────
+
+@app.post("/video/generate", tags=["video"])
+async def generate_video(
+    brand_name: str = Form(...),
+    script: str = Form(...),
+    palette: str = Form("dark_blue"),
+    topic: str = Form(""),
+):
+    """Generate a full MP4 video ad from a script using AI scene planning."""
+    import json, asyncio
+    from .services.video_generator import generate_video_ad
+
+    # Use Claude to break the script into video scenes
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        prompt = (
+            f"Break this ad script into exactly 5 video scenes for brand '{brand_name}'. Topic: {topic or script[:100]}\n\n"
+            f"Script: {script}\n\n"
+            f"Return ONLY a JSON array of 5 objects, each with:\n"
+            f"- tag: string (Hook/Problem/Solution/Proof/CTA)\n"
+            f"- headline: string (max 8 words, punchy)\n"
+            f"- subtext: string (max 15 words supporting text)\n"
+            f"- narration: string (what AI voice will say, 1-2 sentences)\n"
+            f"- duration: number (3-5 seconds)\n"
+            f"- is_cta: boolean (true only for last scene)\n"
+            f"- cta_text: string (e.g. 'Shop Now', 'Learn More', only for last scene)\n"
+            f"Return ONLY the JSON array, no other text."
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        scenes_text = msg.content[0].text.strip()
+        # Extract JSON array from response
+        start = scenes_text.find('[')
+        end = scenes_text.rfind(']') + 1
+        scenes = json.loads(scenes_text[start:end])
+    except Exception as e:
+        logger.warning("Claude scene planning failed, using default scenes: %s", e)
+        # Fallback scenes
+        words = script.split()
+        scenes = [
+            {"tag": "Hook",     "headline": " ".join(words[:6]) if len(words) >= 6 else script[:40], "subtext": "Get ready to transform your business", "narration": script[:120], "duration": 4, "is_cta": False},
+            {"tag": "Problem",  "headline": "Struggling to grow?", "subtext": "You're not alone — we've been there", "narration": "Many businesses face the same challenges every day.", "duration": 3, "is_cta": False},
+            {"tag": "Solution", "headline": f"{brand_name} has the answer", "subtext": "AI-powered tools built for your success", "narration": f"{brand_name} provides everything you need to succeed.", "duration": 4, "is_cta": False},
+            {"tag": "Proof",    "headline": "Results that speak", "subtext": "Trusted by thousands of businesses", "narration": "Our customers see real results from day one.", "duration": 3, "is_cta": False},
+            {"tag": "CTA",      "headline": "Start today", "subtext": "Join thousands of successful businesses", "narration": f"Visit {brand_name} now and start your free trial.", "duration": 4, "is_cta": True, "cta_text": "Get Started Free"},
+        ]
+
+    # Generate the video
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: __import__('asyncio').get_event_loop().run_until_complete(
+                generate_video_ad(scenes, brand_name, palette)
+            )
+        )
+    except Exception:
+        import asyncio as _asyncio
+        result = await _asyncio.to_thread(
+            lambda: None
+        )
+        # Direct async call
+        result = await generate_video_ad(scenes, brand_name, palette)
+
+    return {
+        "video_id": result["video_id"],
+        "download_url": f"/video/download/{result['video_id']}",
+        "scenes": result["scenes"],
+        "status": result["status"],
+        "message": f"Video ad generated with {result['scenes']} scenes!",
+    }
+
+
+@app.get("/video/download/{video_id}", tags=["video"])
+def download_video(video_id: str):
+    """Stream the generated MP4 video."""
+    from pathlib import Path
+    video_path = Path("generated_videos") / f"{video_id}.mp4"
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found or expired.")
+    return FileResponse(
+        str(video_path),
+        media_type="video/mp4",
+        filename=f"ez_nexus_ad_{video_id}.mp4",
+        headers={"Content-Disposition": f"attachment; filename=ez_nexus_ad_{video_id}.mp4"}
+    )
+
+
+@app.get("/video/stream/{video_id}", tags=["video"])
+def stream_video(video_id: str):
+    """Stream video for in-browser playback."""
+    from pathlib import Path
+    video_path = Path("generated_videos") / f"{video_id}.mp4"
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found.")
+    return FileResponse(str(video_path), media_type="video/mp4")
+
+
 # ── Agent Dispatch ────────────────────────────────────────────────────────────
 
 @app.get("/agents/roster", tags=["agents"])

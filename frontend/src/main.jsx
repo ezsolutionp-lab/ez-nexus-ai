@@ -3931,6 +3931,214 @@ function ScoreBar({ label, value }) {
   )
 }
 
+// ── Video Ad Maker Tab ────────────────────────────────────────────────────────
+function VideoAdTab() {
+  const [step, setStep]           = React.useState('form')  // form | generating | done
+  const [form, setForm]           = React.useState({ brand_name:'', topic:'', script:'', palette:'dark_blue' })
+  const [generating, setGenerating] = React.useState(false)
+  const [progress, setProgress]   = React.useState('')
+  const [result, setResult]       = React.useState(null)
+  const [error, setError]         = React.useState('')
+  const [scriptLoading, setScriptLoading] = React.useState(false)
+
+  const PALETTES = [
+    { value:'dark_blue', label:'🔵 Dark Blue (Professional)' },
+    { value:'purple',    label:'💜 Purple (Creative)' },
+    { value:'green',     label:'💚 Green (Health/Nature)' },
+    { value:'orange',    label:'🟠 Orange (Energy/Action)' },
+    { value:'red',       label:'🔴 Red (Bold/Urgent)' },
+    { value:'corporate', label:'🟣 Corporate (Indigo)' },
+  ]
+
+  const generateScript = async () => {
+    if (!form.topic || !form.brand_name) { setError('Enter brand name and topic first'); return }
+    setError(''); setScriptLoading(true)
+    try {
+      const res = await apiFetch('/agents/run', {
+        method: 'POST',
+        body: JSON.stringify({
+          agent_key: 'content_video',
+          task_type: 'write_script',
+          payload: { topic: form.topic, brand_name: form.brand_name, duration: '30', target_audience: 'general audience' }
+        })
+      })
+      const scriptData = res.result?.script || ''
+      // Extract full_script from JSON if Claude returned JSON
+      try {
+        const parsed = typeof scriptData === 'string' ? JSON.parse(scriptData) : scriptData
+        const fullScript = parsed.full_script || parsed.script || Object.values(parsed).join(' ')
+        setForm(f => ({ ...f, script: fullScript }))
+      } catch {
+        setForm(f => ({ ...f, script: String(scriptData).replace(/\\n/g,'\n').replace(/\\"/g,'"') }))
+      }
+    } catch (e) { setError(e.message) }
+    finally { setScriptLoading(false) }
+  }
+
+  const generateVideo = async (e) => {
+    e.preventDefault()
+    if (!form.script || !form.brand_name) { setError('Script and brand name are required'); return }
+    setError(''); setGenerating(true); setStep('generating')
+    const messages = [
+      'Analyzing script with Claude AI...',
+      'Planning 5 video scenes...',
+      'Rendering scene frames...',
+      'Generating AI voiceover narration...',
+      'Assembling video with transitions...',
+      'Encoding final MP4...',
+      'Almost done...'
+    ]
+    let mi = 0
+    const interval = setInterval(() => {
+      setProgress(messages[Math.min(mi++, messages.length - 1)])
+    }, 4000)
+    try {
+      const fd = new FormData()
+      fd.append('brand_name', form.brand_name)
+      fd.append('script', form.script)
+      fd.append('palette', form.palette)
+      fd.append('topic', form.topic)
+      const API_URL = (typeof API !== 'undefined' ? API : null) || import.meta?.env?.VITE_API_URL || 'http://localhost:8000'
+      const token = localStorage.getItem('ez_token')
+      const res = await fetch(`${API_URL}/video/generate`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd
+      })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Video generation failed') }
+      const data = await res.json()
+      setResult(data); setStep('done')
+    } catch (e) { setError(e.message); setStep('form') }
+    finally { clearInterval(interval); setGenerating(false) }
+  }
+
+  const reset = () => { setStep('form'); setResult(null); setError(''); setProgress('') }
+
+  return (
+    <div className="tab-content">
+      {/* Hero */}
+      <div style={{ background:'linear-gradient(135deg,#0a0f2e,#1a0a3e)', borderRadius:14, padding:'28px 32px', marginBottom:24, border:'1px solid #2d1b69' }}>
+        <h2 style={{ color:'#f1f5f9', margin:'0 0 6px', fontSize:'1.6rem', fontWeight:800 }}>🎬 EZ-NEXUS Video Ad Maker</h2>
+        <p style={{ color:'#94a3b8', margin:0, fontSize:'.9rem' }}>Generate professional MP4 video ads from your script — 100% in-house, no third-party video APIs, no copyright issues.</p>
+        <div style={{ display:'flex', gap:10, marginTop:14, flexWrap:'wrap' }}>
+          {['✅ AI Script Writing','✅ 5-Scene Auto Planning','✅ AI Voiceover','✅ MP4 Download','✅ Brand Colors'].map(f => (
+            <span key={f} style={{ background:'rgba(167,139,250,.15)', color:'#a78bfa', padding:'4px 12px', borderRadius:20, fontSize:'.78rem', border:'1px solid rgba(167,139,250,.3)' }}>{f}</span>
+          ))}
+        </div>
+      </div>
+
+      {error && <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', color:'#fca5a5', borderRadius:8, padding:'10px 16px', marginBottom:16, fontSize:'.85rem' }}>{error}</div>}
+
+      {/* STEP: Form */}
+      {step === 'form' && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20 }}>
+          {/* Left — inputs */}
+          <div style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, padding:24 }}>
+            <h3 style={{ color:'#f1f5f9', margin:'0 0 18px', fontSize:'1rem', fontWeight:700 }}>📝 Ad Details</h3>
+            <div style={{ display:'grid', gap:14 }}>
+              <div>
+                <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:4 }}>Brand / Company Name *</label>
+                <input className="input" placeholder="e.g. Nike, EZ-NEXUS AI, Shoes ADD" value={form.brand_name} onChange={e => setForm(f=>({...f,brand_name:e.target.value}))} />
+              </div>
+              <div>
+                <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:4 }}>Video Topic / Product *</label>
+                <input className="input" placeholder="e.g. Running shoes that help you win" value={form.topic} onChange={e => setForm(f=>({...f,topic:e.target.value}))} />
+              </div>
+              <div>
+                <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:4 }}>Brand Color Theme</label>
+                <select className="input" value={form.palette} onChange={e => setForm(f=>({...f,palette:e.target.value}))}>
+                  {PALETTES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <button className="btn btn-sm" style={{ background:'#1e4d72', color:'#38bdf8', border:'1px solid #1e4d72' }} onClick={generateScript} disabled={scriptLoading}>
+                {scriptLoading ? '⏳ Writing script...' : '✨ Auto-Write Script with AI'}
+              </button>
+            </div>
+          </div>
+
+          {/* Right — script */}
+          <div style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, padding:24 }}>
+            <h3 style={{ color:'#f1f5f9', margin:'0 0 18px', fontSize:'1rem', fontWeight:700 }}>🎙️ Video Script</h3>
+            <textarea
+              className="input"
+              style={{ minHeight:200, fontFamily:'inherit', fontSize:'.85rem', lineHeight:1.6 }}
+              placeholder="Your AI-generated or custom script goes here. The AI will split this into 5 scenes automatically..."
+              value={form.script}
+              onChange={e => setForm(f=>({...f,script:e.target.value}))}
+            />
+            <p style={{ color:'#64748b', fontSize:'.75rem', margin:'8px 0 0' }}>Tip: Click "Auto-Write Script with AI" to generate one automatically, or paste your own.</p>
+          </div>
+
+          {/* Generate button full width */}
+          <div style={{ gridColumn:'1/-1' }}>
+            <button
+              className="btn btn-primary"
+              style={{ width:'100%', padding:'14px', fontSize:'1rem', fontWeight:700 }}
+              onClick={generateVideo}
+              disabled={!form.brand_name || !form.script}
+            >
+              🎬 Generate Video Ad (MP4)
+            </button>
+            <p style={{ color:'#64748b', fontSize:'.78rem', textAlign:'center', marginTop:8 }}>
+              Takes 30-90 seconds · AI voiceover included · Downloadable MP4
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* STEP: Generating */}
+      {step === 'generating' && (
+        <div style={{ textAlign:'center', padding:'60px 20px' }}>
+          <div style={{ fontSize:'4rem', marginBottom:20 }}>🎬</div>
+          <h2 style={{ color:'#f1f5f9', margin:'0 0 10px' }}>Creating Your Video Ad...</h2>
+          <p style={{ color:'#38bdf8', fontSize:'1rem', margin:'0 0 30px' }}>{progress || 'Starting up...'}</p>
+          <div style={{ background:'#1e293b', borderRadius:12, padding:'16px 24px', display:'inline-block', border:'1px solid #334155' }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <div style={{ width:10, height:10, borderRadius:'50%', background:'#38bdf8', animation:'pulse 1s infinite' }} />
+              <span style={{ color:'#94a3b8', fontSize:'.88rem' }}>AI is rendering scenes, voiceover, and transitions...</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP: Done */}
+      {step === 'done' && result && (
+        <div>
+          <div style={{ background:'rgba(34,197,94,.1)', border:'1px solid rgba(34,197,94,.3)', borderRadius:12, padding:'20px 24px', marginBottom:24, textAlign:'center' }}>
+            <div style={{ fontSize:'2.5rem', marginBottom:8 }}>🎉</div>
+            <h2 style={{ color:'#22c55e', margin:'0 0 6px' }}>Video Ad Ready!</h2>
+            <p style={{ color:'#94a3b8', margin:'0 0 16px', fontSize:'.88rem' }}>{result.scenes} scenes · AI voiceover · MP4 format</p>
+            <div style={{ display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap' }}>
+              <a
+                href={`${(typeof API !== 'undefined' ? API : null) || import.meta?.env?.VITE_API_URL || 'http://localhost:8000'}${result.download_url}`}
+                download
+                style={{ background:'#22c55e', color:'#fff', padding:'12px 28px', borderRadius:8, textDecoration:'none', fontWeight:700, fontSize:'.9rem' }}
+              >
+                ⬇️ Download MP4
+              </a>
+              <button onClick={reset} style={{ background:'#1e293b', color:'#38bdf8', border:'1px solid #334155', borderRadius:8, padding:'12px 28px', cursor:'pointer', fontWeight:700, fontSize:'.9rem' }}>
+                🎬 Make Another Video
+              </button>
+            </div>
+          </div>
+
+          {/* Video preview */}
+          <div style={{ background:'#0f172a', borderRadius:12, padding:20, border:'1px solid #1e293b', textAlign:'center' }}>
+            <h3 style={{ color:'#94a3b8', margin:'0 0 14px', fontSize:'.9rem' }}>Preview</h3>
+            <video
+              controls
+              style={{ maxWidth:'100%', borderRadius:8, maxHeight:400 }}
+              src={`${(typeof API !== 'undefined' ? API : null) || import.meta?.env?.VITE_API_URL || 'http://localhost:8000'}/video/stream/${result.video_id}`}
+            >
+              Your browser does not support video playback.
+            </video>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EcommerceTab() {
   const [panel, setPanel]             = React.useState('hunter')
   const [huntForm, setHuntForm]       = React.useState({ category:'Home & Kitchen', marketplace:'Amazon', keywords:'', budget:'50' })
@@ -5965,6 +6173,7 @@ function AppInner() {
     { id: 'website-builder', label: '🖥️ Website Builder' },
     { id: 'content-studio',  label: '🎬 Content Studio' },
     { id: 'ecommerce',       label: '🛒 E-Commerce' },
+    { id: 'video-ads',       label: '🎬 Video Ad Maker' },
     { id: 'ai',              label: t.tabs.ai },
     { id: 'subscriptions',   label: '💎 Pricing' },
   ]
@@ -6055,6 +6264,7 @@ function AppInner() {
         {activeTab === 'website-builder' && <WebsiteBuilderTab />}
         {activeTab === 'content-studio'  && <ContentStudioTab />}
         {activeTab === 'ecommerce'       && <EcommerceTab />}
+        {activeTab === 'video-ads'       && <VideoAdTab />}
         {activeTab === 'ai'              && <AIAnalyzerTab />}
         {activeTab === 'subscriptions'   && <SubscriptionsTab />}
         {COMING_SOON_IDS.includes(activeTab) && <ComingSoonTab tabId={activeTab} onBack={() => setActiveTab('home')} />}
