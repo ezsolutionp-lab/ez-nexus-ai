@@ -3933,13 +3933,24 @@ function ScoreBar({ label, value }) {
 
 // ── Video Ad Maker Tab ────────────────────────────────────────────────────────
 function VideoAdTab() {
-  const [step, setStep]           = React.useState('form')  // form | generating | done
-  const [form, setForm]           = React.useState({ brand_name:'', topic:'', script:'', palette:'dark_blue' })
+  const { user } = useAuth()
+  const isAdmin = user?.is_admin || false
+  const [step, setStep]           = React.useState('form')
+  const [form, setForm]           = React.useState({ brand_name:'', topic:'', script:'', palette:'dark_blue', duration:'30' })
   const [generating, setGenerating] = React.useState(false)
   const [progress, setProgress]   = React.useState('')
   const [result, setResult]       = React.useState(null)
   const [error, setError]         = React.useState('')
   const [scriptLoading, setScriptLoading] = React.useState(false)
+
+  const DURATION_PLANS = [
+    { sec:'15',  label:'15 sec',  price:'Free',  scenes:2, tag:'Starter',   color:'#22c55e', desc:'Quick social ad' },
+    { sec:'30',  label:'30 sec',  price:'$2',    scenes:3, tag:'Popular',   color:'#38bdf8', desc:'Standard ad' },
+    { sec:'45',  label:'45 sec',  price:'$4',    scenes:4, tag:'',          color:'#94a3b8', desc:'Extended story' },
+    { sec:'60',  label:'60 sec',  price:'$6',    scenes:5, tag:'Best Value',color:'#a78bfa', desc:'Full commercial' },
+    { sec:'90',  label:'90 sec',  price:'$9',    scenes:7, tag:'',          color:'#94a3b8', desc:'Detailed pitch' },
+    { sec:'120', label:'2 min',   price:'$12',   scenes:9, tag:'Pro',       color:'#f59e0b', desc:'Brand story' },
+  ]
 
   const PALETTES = [
     { value:'dark_blue', label:'🔵 Dark Blue (Professional)' },
@@ -4002,6 +4013,7 @@ function VideoAdTab() {
       fd.append('script', form.script)
       fd.append('palette', form.palette)
       fd.append('topic', form.topic)
+      fd.append('duration', form.duration)
       const API_URL = (typeof API !== 'undefined' ? API : null) || import.meta?.env?.VITE_API_URL || 'http://localhost:8000'
       const token = localStorage.getItem('ez_token')
       const res = await fetch(`${API_URL}/video/generate`, {
@@ -4031,7 +4043,12 @@ function VideoAdTab() {
         </div>
       </div>
 
-      {error && <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', color:'#fca5a5', borderRadius:8, padding:'10px 16px', marginBottom:16, fontSize:'.85rem' }}>{error}</div>}
+      {error && (
+        <div style={{ background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', color:'#fca5a5', borderRadius:8, padding:'10px 16px', marginBottom:16, fontSize:'.85rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span>{error}</span>
+          <button onClick={()=>setError('')} style={{ background:'none', border:'none', color:'#fca5a5', cursor:'pointer', fontSize:'1.1rem', lineHeight:1 }}>✕</button>
+        </div>
+      )}
 
       {/* STEP: Form */}
       {step === 'form' && (
@@ -4058,7 +4075,30 @@ function VideoAdTab() {
                 {scriptLoading ? '⏳ Writing script...' : '✨ Auto-Write Script with AI'}
               </button>
             </div>
+
+            {/* Duration + Pricing */}
+            <div style={{ marginTop:8 }}>
+              <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:8 }}>
+                Video Duration {isAdmin && <span style={{ color:'#22c55e', fontWeight:700 }}>— Admin: All durations FREE & Unlimited</span>}
+              </label>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+                {DURATION_PLANS.map(d => (
+                  <div key={d.sec}
+                    onClick={() => setForm(f=>({...f, duration:d.sec}))}
+                    style={{ border:`2px solid ${form.duration===d.sec ? d.color : '#334155'}`, borderRadius:8, padding:'8px 10px', cursor:'pointer', background: form.duration===d.sec ? 'rgba(56,189,248,.08)' : '#0f172a', position:'relative', transition:'all .15s' }}>
+                    {d.tag && <span style={{ position:'absolute', top:-8, right:6, background:d.color, color:'#0f172a', fontSize:'.6rem', fontWeight:800, padding:'1px 7px', borderRadius:10 }}>{d.tag}</span>}
+                    <div style={{ color: form.duration===d.sec ? d.color : '#f1f5f9', fontWeight:700, fontSize:'.9rem' }}>{d.label}</div>
+                    <div style={{ color:'#64748b', fontSize:'.7rem' }}>{d.desc}</div>
+                    <div style={{ color: isAdmin ? '#22c55e' : d.color, fontWeight:700, fontSize:'.85rem', marginTop:2 }}>
+                      {isAdmin ? '✅ Free' : d.price}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {!isAdmin && <p style={{ color:'#64748b', fontSize:'.72rem', margin:'6px 0 0' }}>💡 Admin accounts have unlimited free access to all durations.</p>}
+            </div>
           </div>
+        </div>
 
           {/* Right — script */}
           <div style={{ background:'#1e293b', border:'1px solid #334155', borderRadius:12, padding:24 }}>
@@ -4075,17 +4115,25 @@ function VideoAdTab() {
 
           {/* Generate button full width */}
           <div style={{ gridColumn:'1/-1' }}>
-            <button
-              className="btn btn-primary"
-              style={{ width:'100%', padding:'14px', fontSize:'1rem', fontWeight:700 }}
-              onClick={generateVideo}
-              disabled={!form.brand_name || !form.script}
-            >
-              🎬 Generate Video Ad (MP4)
-            </button>
-            <p style={{ color:'#64748b', fontSize:'.78rem', textAlign:'center', marginTop:8 }}>
-              Takes 30-90 seconds · AI voiceover included · Downloadable MP4
-            </p>
+            {(() => {
+              const plan = DURATION_PLANS.find(d => d.sec === form.duration) || DURATION_PLANS[1]
+              const price = isAdmin ? 'FREE (Admin)' : plan.price
+              return (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    style={{ width:'100%', padding:'14px', fontSize:'1rem', fontWeight:700 }}
+                    onClick={generateVideo}
+                    disabled={!form.brand_name || !form.script}
+                  >
+                    🎬 Generate {plan.label} Video Ad — {price}
+                  </button>
+                  <p style={{ color:'#64748b', fontSize:'.78rem', textAlign:'center', marginTop:8 }}>
+                    {plan.scenes} scenes · AI voiceover · MP4 download · Takes ~{Math.round(parseInt(form.duration) * 1.2)}s to generate
+                  </p>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}

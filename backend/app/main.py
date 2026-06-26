@@ -967,19 +967,24 @@ async def generate_video(
     script: str = Form(...),
     palette: str = Form("dark_blue"),
     topic: str = Form(""),
+    duration: str = Form("30"),
 ):
     """Generate a full MP4 video ad from a script using AI scene planning."""
     import json, asyncio
     from .services.video_generator import generate_video_ad
+
+    # Calculate scene count from duration
+    dur_sec = int(duration) if duration.isdigit() else 30
+    scene_count = max(2, min(10, dur_sec // 12))
 
     # Use Claude to break the script into video scenes
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
         prompt = (
-            f"Break this ad script into exactly 5 video scenes for brand '{brand_name}'. Topic: {topic or script[:100]}\n\n"
+            f"Break this ad script into exactly {scene_count} video scenes for brand '{brand_name}'. Topic: {topic or script[:100]}\n\n"
             f"Script: {script}\n\n"
-            f"Return ONLY a JSON array of 5 objects, each with:\n"
+            f"Return ONLY a JSON array of {scene_count} objects, each with:\n"
             f"- tag: string (Hook/Problem/Solution/Proof/CTA)\n"
             f"- headline: string (max 8 words, punchy)\n"
             f"- subtext: string (max 15 words supporting text)\n"
