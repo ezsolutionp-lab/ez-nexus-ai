@@ -3962,15 +3962,19 @@ function VideoAdTab() {
           payload: { topic: form.topic, brand_name: form.brand_name, duration: '30', target_audience: 'general audience' }
         })
       })
-      const scriptData = res.result?.script || ''
-      // Extract full_script from JSON if Claude returned JSON
+      // Extract the script text from the result
+      const raw = res.result?.script || res.result || ''
+      const rawStr = typeof raw === 'string' ? raw : JSON.stringify(raw)
+      // Try to parse JSON and grab full_script field
+      let finalScript = rawStr
       try {
-        const parsed = typeof scriptData === 'string' ? JSON.parse(scriptData) : scriptData
-        const fullScript = parsed.full_script || parsed.script || Object.values(parsed).join(' ')
-        setForm(f => ({ ...f, script: fullScript }))
-      } catch {
-        setForm(f => ({ ...f, script: String(scriptData).replace(/\\n/g,'\n').replace(/\\"/g,'"') }))
-      }
+        // Strip markdown code fences if present
+        const clean = rawStr.replace(/^```json\s*/,'').replace(/```\s*$/,'').trim()
+        const parsed = JSON.parse(clean)
+        finalScript = parsed.full_script || parsed.script || parsed.main_message || Object.values(parsed).filter(v => typeof v === 'string' && v.length > 20).join('\n\n')
+      } catch { /* keep raw string */ }
+      finalScript = finalScript.replace(/\\n/g,'\n').replace(/\\"/g,'"').replace(/^"|"$/g,'')
+      setForm(f => ({ ...f, script: finalScript }))
     } catch (e) { setError(e.message) }
     finally { setScriptLoading(false) }
   }
@@ -4038,7 +4042,7 @@ function VideoAdTab() {
             <div style={{ display:'grid', gap:14 }}>
               <div>
                 <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:4 }}>Brand / Company Name *</label>
-                <input className="input" placeholder="e.g. Nike, EZ-NEXUS AI, Shoes ADD" value={form.brand_name} onChange={e => setForm(f=>({...f,brand_name:e.target.value}))} />
+                <input className="input" autoComplete="off" autoCorrect="off" spellCheck="false" placeholder="e.g. Nike, EZ-NEXUS AI, Shoes ADD" value={form.brand_name} onChange={e => setForm(f=>({...f,brand_name:e.target.value}))} />
               </div>
               <div>
                 <label style={{ color:'#94a3b8', fontSize:'.78rem', display:'block', marginBottom:4 }}>Video Topic / Product *</label>
