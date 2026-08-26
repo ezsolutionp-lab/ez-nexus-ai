@@ -83,6 +83,18 @@ app.add_middleware(
 # Mount sub-routers
 app.include_router(auth_router)
 
+# ── MO NEXUS OMEGA control plane ─────────────────────────────────────────────
+# Mounted additively under /api/mo. Every legacy route above is untouched.
+# These routers are authenticated by construction (see mo.security.zero_trust);
+# tests/security/test_zero_trust_coverage.py fails the build if any MO route
+# becomes reachable anonymously.
+from .api import builder as _mo_builder          # noqa: E402
+from .api import mo_core as _mo_core             # noqa: E402
+
+for _mo_router in _mo_core.ALL_ROUTERS + _mo_builder.ALL_ROUTERS:
+    app.include_router(_mo_router)
+logger.info("MO control plane mounted at /api/mo")
+
 
 # ── Health ───────────────────────────────────────────────────────────────────
 

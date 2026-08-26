@@ -77,8 +77,16 @@ class User(Base):
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     last_login      = Column(DateTime(timezone=True), nullable=True)
 
+    # ── MO tenancy + identity hardening (migration 0003_user_tenancy) ──
+    tenant_id          = Column(String(64), nullable=False, index=True, default="tnt-default")
+    mfa_secret         = Column(String(64), nullable=True)
+    mfa_enabled        = Column(Boolean, default=False, nullable=False)
+    failed_login_count = Column(Integer, default=0, nullable=False)
+    locked_until       = Column(DateTime, nullable=True)
+
     def __repr__(self):
         return f"<User id={self.id} email='{self.email}' admin={self.is_admin}>"
+
 
 
 class AdminAlert(Base):

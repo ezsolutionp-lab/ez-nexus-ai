@@ -29,3 +29,8 @@ logs/
 
 # Render / deployment
 .render/
+
+# MO Builder
+mo_workspaces/
+generated_videos/
+*.db
