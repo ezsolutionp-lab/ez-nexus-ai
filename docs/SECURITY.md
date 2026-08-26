@@ -98,3 +98,52 @@ no placeholder key a deployment can accidentally run on.
 
 The MO platform's own `config.py` still carries a committed default admin
 password — production blocker **BLOCK-03** from the gap analysis, unresolved.
+
+## Known vulnerable dependencies
+
+The CI `pip-audit` step reports two findings. Both are transitive, both are
+**currently unfixable**, and neither is introduced by this change — they are
+recorded here rather than left as an unexplained CI warning.
+
+| Package | Version | Advisory | Reached via | Status |
+|---|---|---|---|---|
+| `click` | 8.1.8 | PYSEC-2026-2132 | `uvicorn`, `gTTS` | **Blocked by a constraint conflict** |
+| `ecdsa` | 0.19.2 | PYSEC-2026-1325 | `python-jose[cryptography]` | **No fix published** |
+
+### `click` — blocked, not ignored
+
+The advisory is fixed in `click>=8.3.3`. `gTTS` 2.5.4 — the latest release —
+pins `click<8.2`, so no version of `click` satisfies both. Verified:
+
+```
+gtts 2.5.4 requires click<8.2,>=7.1, but you have click 8.5.0 which is incompatible
+```
+
+Remediation options, in order of preference:
+
+1. Wait for a `gTTS` release that relaxes the `click` pin, then pin `click>=8.3.3`.
+2. Replace `gTTS` in `services/video_generator.py` with a TTS library that does
+   not constrain `click`. The generator already degrades to a silent video when
+   TTS fails, so the blast radius is contained.
+3. Drop the in-house video generator if TTS is not required.
+
+### `ecdsa` — no upstream fix
+
+`python-jose` depends on `ecdsa` unconditionally. No fixed version has been
+published, so there is nothing to pin to.
+
+The durable remediation is to replace `python-jose` with `PyJWT`, which has no
+`ecdsa` dependency. That touches `app/auth.py` and the generated
+`app/security.py` template, so it belongs in its own change rather than being
+folded into the Builder work.
+
+Note that the same `python-jose` dependency chain also causes the Debian
+`cryptography` 41.0.7 import panic documented in the gap analysis. Both point at
+the same fix.
+
+### Why the CI step warns instead of failing
+
+`pip-audit` runs with `|| echo "::warning::…"`. Making it blocking today would
+make CI permanently red on two findings that cannot be fixed from inside this
+repository — which trains people to ignore a red build. It should be switched to
+blocking as soon as both are resolvable.
