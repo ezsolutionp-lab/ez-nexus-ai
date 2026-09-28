@@ -47,6 +47,8 @@ those, tenant-scoped, and audited. The API lives under `/api/mo/platform` and th
 
 ## Running the tests
 
+Tests that need a secret-shaped value (to prove guards refuse it) build it at runtime, because CI scans each commit for credential-shaped literals.
+
 ```
 cd backend && python3 -m pytest ../tests -q
 ```
