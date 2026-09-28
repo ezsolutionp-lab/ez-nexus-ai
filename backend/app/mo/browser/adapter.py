@@ -132,12 +132,12 @@ def _wrap(payload_text: str, **extra: Any) -> dict[str, Any]:
 
 
 def read_page(ctx: RequestContext, payload: dict[str, Any]) -> MoResult:
+    url = payload.get("url")
+    if (problem := _entry_problem(url)):                        # policy first: the verdict must not depend on the browser
+        return MoResult(ResultState.POLICY_DENIED if problem != "A 'url' is required." else ResultState.FAILED, problem)
     ok, why = available()
     if not ok:
         return MoResult(ResultState.PROVIDER_UNAVAILABLE, f"Browser tools are unavailable: {why}.")
-    url = payload.get("url")
-    if (problem := _entry_problem(url)):
-        return MoResult(ResultState.POLICY_DENIED if problem != "A 'url' is required." else ResultState.FAILED, problem)
     with _Session() as s:
         if (err := _open(s, url)):
             err.meta["blocked_requests"] = s.blocked
@@ -153,9 +153,6 @@ def read_page(ctx: RequestContext, payload: dict[str, Any]) -> MoResult:
 
 
 def submit_form(ctx: RequestContext, payload: dict[str, Any]) -> MoResult:
-    ok, why = available()
-    if not ok:
-        return MoResult(ResultState.PROVIDER_UNAVAILABLE, f"Browser tools are unavailable: {why}.")
     url, fields, submit = payload.get("url"), payload.get("fields") or {}, payload.get("submit_selector")
     if (problem := _entry_problem(url)):
         return MoResult(ResultState.POLICY_DENIED if problem != "A 'url' is required." else ResultState.FAILED, problem)
@@ -163,6 +160,9 @@ def submit_form(ctx: RequestContext, payload: dict[str, Any]) -> MoResult:
         return MoResult(ResultState.FAILED, "fields must be an object of 1-30 selector -> text entries.")
     if not isinstance(submit, str) or not submit:
         return MoResult(ResultState.FAILED, "submit_selector is required.")
+    ok, why = available()
+    if not ok:
+        return MoResult(ResultState.PROVIDER_UNAVAILABLE, f"Browser tools are unavailable: {why}.")
     from playwright.sync_api import Error as PwError, TimeoutError as PwTimeout
     with _Session() as s:
         if (err := _open(s, url)):

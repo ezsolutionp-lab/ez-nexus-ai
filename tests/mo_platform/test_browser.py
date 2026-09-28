@@ -91,8 +91,19 @@ def test_private_and_non_http_urls_are_refused_before_a_browser_starts(bctx, mon
     assert adapter.read_page(bctx, {}).state == ResultState.FAILED
 
 
+def test_policy_verdicts_do_not_depend_on_whether_a_browser_is_installed(bctx, monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(adapter, "available", lambda: (False, "not installed"))
+    assert adapter.read_page(bctx, {"url": "http://127.0.0.1/"}).state == ResultState.POLICY_DENIED
+    assert adapter.read_page(bctx, {"url": "file:///etc/passwd"}).state == ResultState.POLICY_DENIED
+    assert adapter.submit_form(bctx, {"url": "http://169.254.169.254/", "fields": {"a": "b"},
+                                      "submit_selector": "#x"}).state == ResultState.POLICY_DENIED
+    assert adapter.submit_form(bctx, {"url": "https://example.com", "fields": {}, "submit_selector": "#x"}).state == ResultState.FAILED
+
+
 def test_tools_report_unavailable_without_playwright(bctx, monkeypatch):
     monkeypatch.setattr(adapter, "available", lambda: (False, "the 'playwright' package is not installed"))
+    monkeypatch.setattr(adapter, "_entry_problem", lambda url: None)          # isolate the availability path from DNS
     res = adapter.read_page(bctx, {"url": "http://example.com"})
     assert res.state == ResultState.PROVIDER_UNAVAILABLE and "not installed" in res.detail
     assert adapter.submit_form(bctx, {"url": "http://example.com", "fields": {"a": "b"}, "submit_selector": "#x"}).state == ResultState.PROVIDER_UNAVAILABLE
