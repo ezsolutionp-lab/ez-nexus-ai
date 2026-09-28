@@ -363,3 +363,18 @@ def test_manifest_is_served_and_honest(app_and_client, auth):
     assert sum(m["summary"].values()) == len(m["capabilities"])
     assert m["summary"]["planned"] > 0 and m["known_blockers"]
     assert m["live"]["wake_word_mode"] == "transcript-keyword"
+
+
+def test_truth_router_and_context_tools_over_http(app_and_client, auth):
+    _, c, _ = app_and_client
+    ev = [{"id": "d1", "text": "Revenue grew 12% in 2025 to 4.2 million dollars."}]
+    r = c.post(P + "/domain/verify_claims", headers=auth, json={"answer": "Revenue grew 15% in 2025.", "evidence": ev})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["counts"]["CONTRADICTED"] == 1 and r.json()["data"]["abstain"] is True
+    r = c.post(P + "/domain/route", headers=auth, json={"text": "Pay the invoice and run payroll"})
+    assert r.json()["data"]["domain"] == "finance"
+    msgs = [{"role": "user", "content": "The budget is 100 dollars for the project. " * 200} for _ in range(30)]
+    r = c.post(P + "/domain/compress_context", headers=auth, json={"messages": msgs, "policy": {"keep_recent_turns": 2}})
+    assert r.status_code == 200 and r.json()["data"]["compressed"] is True
+    bad = c.post(P + "/domain/route", headers=auth, json={"text": ""})
+    assert bad.status_code == 422

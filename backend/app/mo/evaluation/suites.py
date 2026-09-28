@@ -55,7 +55,29 @@ def governance() -> EvalSuite:
         ])
 
 
-BUILTIN = {"domain-engines": domain_engines, "guards": guards, "governance": governance}
+def truth_and_routing() -> EvalSuite:
+    evidence = [{"id": "d1", "text": "Revenue grew 12% in 2025 to 4.2 million dollars.", "source": "10-K", "quality": 0.9}]
+    return EvalSuite(
+        name="truth-and-routing", threshold=1.0,
+        description="Known-answer checks for claim verification and the domain router.",
+        cases=[
+            EvalCase("supported-claim", "domain.verify_claims",
+                     {"answer": "Revenue grew 12% in 2025.", "evidence": evidence},
+                     equals={"counts.SUPPORTED": 1, "abstain": False}),
+            EvalCase("wrong-figure-contradicts", "domain.verify_claims",
+                     {"answer": "Revenue grew 15% in 2025.", "evidence": evidence},
+                     equals={"counts.CONTRADICTED": 1, "abstain": True, "requires_human_review": True}),
+            EvalCase("invented-claim-unsupported", "domain.verify_claims",
+                     {"answer": "The company opened a Paris office.", "evidence": evidence},
+                     equals={"counts.UNSUPPORTED": 1, "abstain": True}),
+            EvalCase("route-commerce", "domain.route", {"text": "Sync my Shopify inventory and refund the order"},
+                     equals={"domain": "commerce"}),
+            EvalCase("route-unknown-is-general", "domain.route", {"text": "hello there"}, equals={"domain": "general"}),
+        ])
+
+
+BUILTIN = {"domain-engines": domain_engines, "guards": guards, "governance": governance,
+           "truth-and-routing": truth_and_routing}
 
 
 def get_suite(name: str):

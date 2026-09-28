@@ -16,6 +16,9 @@ those, tenant-scoped, and audited. The API lives under `/api/mo/platform` and th
 | Dry-run / rollback | `app/mo/control/reversible.py` | Rollback never self-approves. |
 | Orchestrator | `app/mo/orchestration` | DAG of tool / gate steps with retries, budgets, checkpoints, resume. |
 | Domain intelligence | `app/mo/intelligence` | Forecast (Holt + seasonal), anomalies, critical path, Monte Carlo, pricing, lead score, pipeline forecast, NPV/IRR/runway, recommender, keywords, action items, briefing. Classical statistics, not neural models. |
+| Truth verification | `app/mo/truth` | Claim splitting, evidence linking with citations, contradiction (changed figures / flipped polarity), source quality, freshness, abstention and a human-review flag. Extends `guards.grounding`. Lexical and numeric only: it can miss paraphrase, and support is not proof. |
+| Domain router | `app/mo/intelligence/router.py` | 10 domains, weighted keywords and phrases, confidence, ambiguity and alternatives. Unknown vocabulary routes to `general`. |
+| Context and cache | `app/mo/modelfabric/context.py` | Extractive context compression and a per-tenant semantic cache that refuses secrets and PII. **Not yet wired into `ModelRouter` calls**; token counts are estimates. |
 | Evaluation | `app/mo/evaluation` | Deterministic graders, persisted and audited runs. |
 | Protocols | `app/mo/protocols` | MCP client + server (JSON-RPC 2.0), A2A (HMAC-SHA256, 300 s replay window), SSRF egress guard. |
 | Observability | `app/mo/observability` | Prometheus metrics, per-tenant traces. |

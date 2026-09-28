@@ -14,7 +14,9 @@ from typing import Any, Callable
 from ..context import RequestContext
 from ..errors import MoResult, ResultState
 from ..tools.spec import RiskLevel, ToolRegistry, ToolSpec
-from . import commercial, planning, text, timeseries
+from ..modelfabric.context import ContextPolicy, compress
+from ..truth import verify_claims
+from . import commercial, planning, router, text, timeseries
 
 SCOPE = "domain:run"
 
@@ -44,6 +46,27 @@ def _action_items(p: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             raise ValueError("today must be YYYY-MM-DD") from None
     return text.extract_action_items(p["text"], today=today)
+
+
+def _verify(p: dict[str, Any]) -> dict[str, Any]:
+    today = None
+    if p.get("today"):
+        try:
+            today = date.fromisoformat(p["today"])
+        except ValueError:
+            raise ValueError("today must be YYYY-MM-DD") from None
+    if (p.get("answer") is None) == (p.get("claims") is None):
+        raise ValueError("provide exactly one of 'answer' or 'claims'")
+    return verify_claims(p.get("answer"), p["evidence"], claims=p.get("claims"), today=today,
+                         max_age_days=p.get("max_age_days"), critical=bool(p.get("critical", False)),
+                         min_groundedness=p.get("min_groundedness", 0.7))
+
+
+def _compress(p: dict[str, Any]) -> dict[str, Any]:
+    policy = p.get("policy")
+    if policy is not None and (not isinstance(policy, dict) or set(policy) - set(ContextPolicy.__dataclass_fields__)):
+        raise ValueError("policy has unknown fields")
+    return compress(p["messages"], ContextPolicy(**policy) if policy else None)
 
 
 _TOOLS: list[tuple[str, str, Callable, dict]] = [
@@ -88,6 +111,18 @@ _TOOLS: list[tuple[str, str, Callable, dict]] = [
     ("domain.action_items", "Extract explicit action items, owners and due dates from meeting notes.",
      _action_items,
      {"properties": {"text": {"type": "string"}, "today": {"type": "string"}}, "required": ["text"]}),
+    ("domain.verify_claims", "Check an answer's claims against evidence: support, contradiction, staleness, "
+     "source quality, abstention and human-review flag (lexical, not an entailment model).",
+     _verify,
+     {"properties": {"answer": {"type": "string"}, "claims": _ARR, "evidence": _ARR, "today": {"type": "string"},
+                     "max_age_days": {"type": "integer"}, "critical": {"type": "boolean"},
+                     "min_groundedness": {"type": "number"}}, "required": ["evidence"]}),
+    ("domain.route", "Route a request to a business domain with confidence and alternatives (rule-based).",
+     lambda p: router.route_domain(p["text"], min_score=p.get("min_score", 2.0)),
+     {"properties": {"text": {"type": "string"}, "min_score": {"type": "number"}}, "required": ["text"]}),
+    ("domain.compress_context", "Shrink a long conversation to fit a token budget with an extractive summary.",
+     _compress,
+     {"properties": {"messages": _ARR, "policy": _OBJ}, "required": ["messages"]}),
     ("domain.briefing", "Order pending items into a briefing, holding non-urgent ones during quiet hours.",
      _briefing,
      {"properties": {"items": _ARR, "now": {"type": "string"}, "quiet_start": {"type": "string"},

@@ -131,7 +131,7 @@ def test_builtin_suites_pass(db, dctx, name):
 
 def test_builtin_suite_lookup():
     assert suites.get_suite("nope") is None
-    assert set(suites.suite_names()) == {"domain-engines", "guards", "governance"}
+    assert set(suites.suite_names()) == {"domain-engines", "guards", "governance", "truth-and-routing"}
 
 
 # ── guard metrics ───────────────────────────────────────────────────────────
