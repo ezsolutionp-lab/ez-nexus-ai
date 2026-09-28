@@ -93,6 +93,8 @@ wake word, speaker verification, object recognition, exchange account connectors
 
 ## Remaining production blockers
 
+`pip-audit` still reports a `click` advisory (PYSEC-2026-2132): the fix needs click 8.3+, but `gTTS` requires `click<8.2`. Replacing or dropping gTTS clears it.
+
 Legacy tables have no tenant column, so authenticated users share the legacy data. Third-party adapters have not been
 exercised against the live services.
 
