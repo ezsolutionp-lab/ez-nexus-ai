@@ -155,6 +155,28 @@ class ToolRegistry:
         *,
         approval_granted: bool = False,
     ) -> MoResult:
+        """Run governance, then the handler, and record the outcome as a span and metrics."""
+        from ..observability.metrics import metrics
+        from ..observability.tracing import tracer
+
+        started = time.perf_counter()
+        with tracer.span(f"tool:{name}", ctx, tool=name) as sp:
+            result = self._invoke(ctx, name, payload, approval_granted=approval_granted)
+            sp.state = result.state.value
+        metrics.inc("mo_tool_invocations_total", tool=name if self.get(name) else "unknown",
+                    state=result.state.value)
+        metrics.observe("mo_tool_duration_ms", (time.perf_counter() - started) * 1000,
+                        tool=name if self.get(name) else "unknown")
+        return result
+
+    def _invoke(
+        self,
+        ctx: RequestContext,
+        name: str,
+        payload: Optional[dict[str, Any]] = None,
+        *,
+        approval_granted: bool = False,
+    ) -> MoResult:
         """Run governance, then the handler. Every rejection names its reason."""
         payload = payload or {}
         spec = self._tools.get(name)
@@ -235,6 +257,8 @@ def get_tool_registry() -> ToolRegistry:
         _registry = ToolRegistry()
         from .builtin import register_builtin_tools
         register_builtin_tools(_registry)
+        from ..intelligence.tools import register_domain_tools
+        register_domain_tools(_registry)
     return _registry
 
 

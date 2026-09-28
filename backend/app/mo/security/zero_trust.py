@@ -153,7 +153,8 @@ def resolve_context(
     else:
         # A non-admin gets read/write on the builder surface; privileged scopes
         # (deploy, net, comms, payments) are granted explicitly, never by default.
-        scopes.update({"builder:read", "builder:write"})
+        # domain:run is pure computation over the request payload, with no I/O.
+        scopes.update({"builder:read", "builder:write", "domain:run"})
 
     return RequestContext(
         tenant_id=tenant_id,

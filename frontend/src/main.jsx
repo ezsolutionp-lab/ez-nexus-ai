@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import BuilderStudio from './mo/BuilderStudio.jsx'
 import JarvisConsole from './mo/JarvisConsole.jsx'
+import CommandCenter from './mo/CommandCenter.jsx'
 import { createRoot } from 'react-dom/client'
 import './style.css'
 import { LangProvider, useLang, LANG_LIST } from './i18n.jsx'
@@ -6578,6 +6579,11 @@ function MoJarvisTab() {
   return <JarvisConsole token={token} />
 }
 
+function MoCommandTab() {
+  const { token } = useAuth()
+  return <CommandCenter token={token} />
+}
+
 function MoBuilderTab() {
   const { token } = useAuth()
   return <BuilderStudio token={token} />
@@ -6637,6 +6643,7 @@ function AppInner() {
     { id: 'commander',       label: '🤖 Commander AI' },
     { id: 'mo-jarvis',       label: '🎙️ Talk to MO' },
     { id: 'mo-builder',      label: '🏗️ MO Builder Studio' },
+    { id: 'mo-command',      label: '🧭 MO Command Center' },
     { id: 'website-builder', label: '🖥️ Website Builder' },
     { id: 'content-studio',  label: '🎬 Content Studio' },
     { id: 'ecommerce',       label: '🛒 E-Commerce' },
@@ -6730,6 +6737,7 @@ function AppInner() {
         {activeTab === 'commander'       && <CommanderTab />}
         {activeTab === 'mo-jarvis'       && <MoJarvisTab />}
         {activeTab === 'mo-builder'      && <MoBuilderTab />}
+        {activeTab === 'mo-command'      && <MoCommandTab />}
         {activeTab === 'website-builder' && <WebsiteBuilderTab />}
         {activeTab === 'content-studio'  && <ContentStudioTab />}
         {activeTab === 'ecommerce'       && <EcommerceTab />}

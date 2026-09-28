@@ -535,3 +535,181 @@ class VoiceTurn(Base, TenantMixin):
 
 
 VOICE_TABLES = ["mo_voice_sessions", "mo_voice_turns"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform layer: knowledge, memory, orchestration, control, protocols, evaluation
+# ─────────────────────────────────────────────────────────────────────────────
+
+class KnowledgeDoc(Base, TenantMixin):
+    """A source document. Classification and scopes are enforced before any ranking."""
+
+    __tablename__ = "mo_knowledge_docs"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    title = Column(String(300), nullable=False)
+    source = Column(String(500), nullable=True)
+    classification = Column(String(16), nullable=False, default="INTERNAL")
+    allowed_scopes_json = Column(Text, nullable=False, default="[]")     # empty = any tenant member
+    content_hash = Column(String(64), nullable=False)
+    chunk_count = Column(Integer, nullable=False, default=0)
+    embedder = Column(String(60), nullable=False, default="local-hashed-ngram")
+
+    __table_args__ = (UniqueConstraint("tenant_id", "content_hash", name="uq_mo_knowledge_doc_hash"),)
+
+
+class KnowledgeChunk(Base, TenantMixin):
+    __tablename__ = "mo_knowledge_chunks"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    doc_id = Column(String(64), ForeignKey("mo_knowledge_docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    seq = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    terms_json = Column(Text, nullable=False, default="[]")
+    vector_json = Column(Text, nullable=False, default="{}")
+    entities_json = Column(Text, nullable=False, default="[]")
+
+
+class MemoryRecord(Base, TenantMixin):
+    """One remembered item. Private to `actor_id` unless `shared` is set."""
+
+    __tablename__ = "mo_memories"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    actor_id = Column(String(64), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, index=True)
+    # WORKING | SHORT_TERM | LONG_TERM | SEMANTIC | EPISODIC | PROCEDURAL
+    key = Column(String(200), nullable=True)
+    content = Column(Text, nullable=False)
+    importance = Column(Float, nullable=False, default=0.5)
+    shared = Column(Boolean, nullable=False, default=False)
+    classification = Column(String(16), nullable=False, default="INTERNAL")
+    tags_json = Column(Text, nullable=False, default="[]")
+    terms_json = Column(Text, nullable=False, default="[]")
+    vector_json = Column(Text, nullable=False, default="{}")
+    access_count = Column(Integer, nullable=False, default=0)
+    last_accessed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    redactions_json = Column(Text, nullable=False, default="[]")
+
+
+class OrchestrationRun(Base, TenantMixin):
+    """A supervised DAG run. Its steps are checkpointed so a run can resume."""
+
+    __tablename__ = "mo_runs"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    name = Column(String(200), nullable=False)
+    status = Column(String(24), nullable=False, default="PENDING")
+    # PENDING | RUNNING | SUCCEEDED | FAILED | PARTIAL | AWAITING_APPROVAL | CANCELLED
+    spec_json = Column(Text, nullable=False)
+    budget_usd = Column(Float, nullable=False, default=1.0)
+    spent_usd = Column(Float, nullable=False, default=0.0)
+    autonomy_level = Column(Integer, nullable=False, default=1)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    detail = Column(Text, nullable=True)
+    trace_id = Column(String(64), nullable=True)
+
+
+class OrchestrationStep(Base, TenantMixin):
+    __tablename__ = "mo_run_steps"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    run_id = Column(String(64), ForeignKey("mo_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_key = Column(String(80), nullable=False)
+    kind = Column(String(24), nullable=False)          # tool | agent | domain | gate
+    target = Column(String(160), nullable=False)
+    depends_on_json = Column(Text, nullable=False, default="[]")
+    status = Column(String(24), nullable=False, default="PENDING")
+    # PENDING | RUNNING | SUCCEEDED | FAILED | SKIPPED | AWAITING_APPROVAL | CANCELLED
+    attempts = Column(Integer, nullable=False, default=0)
+    result_state = Column(String(40), nullable=True)
+    output_json = Column(Text, nullable=True)
+    detail = Column(Text, nullable=True)
+    approval_id = Column(String(64), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+
+    __table_args__ = (UniqueConstraint("run_id", "step_key", name="uq_mo_run_step_key"),)
+
+
+class AutonomyPolicy(Base, TenantMixin):
+    """Autonomy level (0-5) for a subject: an agent, a domain or an action prefix."""
+
+    __tablename__ = "mo_autonomy_policies"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    subject = Column(String(160), nullable=False)
+    level = Column(Integer, nullable=False, default=1)
+    reason = Column(Text, nullable=True)
+    max_level = Column(Integer, nullable=False, default=3)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "subject", name="uq_mo_autonomy_subject"),)
+
+
+class ShadowRecord(Base, TenantMixin):
+    """What MO proposed versus what the human actually decided — the evidence for promotion."""
+
+    __tablename__ = "mo_shadow_records"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    subject = Column(String(160), nullable=False, index=True)
+    action = Column(String(160), nullable=False)
+    proposal_json = Column(Text, nullable=False)
+    human_json = Column(Text, nullable=True)
+    agreed = Column(Boolean, nullable=True)
+    decided_at = Column(DateTime, nullable=True)
+
+
+class ReversibleAction(Base, TenantMixin):
+    """An executed action with the instruction to undo it, so rollback is a real operation."""
+
+    __tablename__ = "mo_reversible_actions"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    action = Column(String(160), nullable=False)
+    resource = Column(String(200), nullable=True)
+    undo_tool = Column(String(120), nullable=True)
+    undo_payload_json = Column(Text, nullable=False, default="{}")
+    status = Column(String(16), nullable=False, default="APPLIED")     # APPLIED | ROLLED_BACK | ROLLBACK_FAILED
+    detail = Column(Text, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+
+
+class ProtocolPeer(Base, TenantMixin):
+    """A registered MCP server or A2A peer. Tools it exposes are allow-listed, never trusted wholesale."""
+
+    __tablename__ = "mo_protocol_peers"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    name = Column(String(120), nullable=False)
+    protocol = Column(String(8), nullable=False)          # MCP | A2A
+    url = Column(String(500), nullable=False)
+    credential_env_var = Column(String(120), nullable=True)
+    allowed_tools_json = Column(Text, nullable=False, default="[]")
+    risk_level = Column(String(16), nullable=False, default="MEDIUM")
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    last_error = Column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_mo_peer_name"),)
+
+
+class EvalRun(Base, TenantMixin):
+    __tablename__ = "mo_eval_runs"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    suite = Column(String(160), nullable=False, index=True)
+    target = Column(String(160), nullable=False)
+    total = Column(Integer, nullable=False)
+    passed_count = Column(Integer, nullable=False)
+    score = Column(Float, nullable=False)
+    threshold = Column(Float, nullable=False)
+    passed = Column(Boolean, nullable=False)
+    results_json = Column(Text, nullable=False)
+
+
+PLATFORM_TABLES = [
+    "mo_knowledge_docs", "mo_knowledge_chunks", "mo_memories", "mo_runs", "mo_run_steps",
+    "mo_autonomy_policies", "mo_shadow_records", "mo_reversible_actions", "mo_protocol_peers",
+    "mo_eval_runs",
+]

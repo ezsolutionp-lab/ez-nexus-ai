@@ -112,9 +112,13 @@ def _reset_singletons():
     from app.mo.tools.spec import reset_tool_registry
     from app.mo.modelfabric.router import reset_router
     from app.mo.events import fabric
+    from app.mo.observability.metrics import metrics
+    from app.mo.observability.tracing import tracer
     reset_tool_registry()
     reset_router()
     fabric.clear_subscribers()
+    metrics.reset()
+    tracer.reset()
     yield
     reset_tool_registry()
     reset_router()

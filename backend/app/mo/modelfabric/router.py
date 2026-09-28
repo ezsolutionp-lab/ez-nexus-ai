@@ -267,6 +267,17 @@ class ModelRouter:
         return out
 
     def complete(self, request: ModelRequest, budget: Optional[Budget] = None) -> MoResult:
+        """Run a completion and record it in the metrics registry."""
+        import time as _time
+
+        from ..observability.tracing import record_model_call
+
+        started = _time.perf_counter()
+        result = self._complete(request, budget)
+        record_model_call(result, (_time.perf_counter() - started) * 1000)
+        return result
+
+    def _complete(self, request: ModelRequest, budget: Optional[Budget] = None) -> MoResult:
         """Run a completion. Returns a truthful MoResult, never a fabricated body."""
         self.refresh_health()
 

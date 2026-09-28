@@ -1956,3 +1956,21 @@ tbody td { padding: 10px 14px; vertical-align: middle; }
 .jv-type button:disabled { background: #94A3B8; cursor: not-allowed; }
 
 .jv-privacy { text-align: center; font-size: 12px; color: #94A3B8; margin: 0; }
+
+/* MO Command Center */
+.cc { max-width: 1000px; margin: 0 auto; }
+.cc-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-tabs button { border: 1px solid #CBD5E1; background: #F8FAFC; color: #0D1F3C; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.cc-tabs button.active { background: #0D1F3C; color: #fff; border-color: #0D1F3C; }
+.cc-panel { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px; }
+.cc-panel h3 { margin: 0; color: #0D1F3C; }
+.cc-panel input, .cc-panel textarea, .cc-panel select { border: 1px solid #CBD5E1; border-radius: 8px; padding: 8px 10px; font: inherit; }
+.cc-panel textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.cc-panel button { align-self: flex-start; border: 1px solid #0D1F3C; background: #0D1F3C; color: #fff; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.cc-panel button:disabled { opacity: .45; cursor: not-allowed; }
+.cc-summary { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
+.cc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cc-table th, .cc-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #E2E8F0; vertical-align: top; }
+.cc-result { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; }
+.cc-result pre { margin: 6px 0 0; max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+.cc-detail { margin: 6px 0 0; font-size: 13px; color: #334155; }
