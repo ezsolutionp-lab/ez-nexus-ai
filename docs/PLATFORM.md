@@ -24,6 +24,26 @@ those, tenant-scoped, and audited. The API lives under `/api/mo/platform` and th
 | Observability | `app/mo/observability` | Prometheus metrics, per-tenant traces. |
 | Guards | `app/mo/guards` | Prompt-injection screening and PII redaction on model input/output. |
 
+## MO authority (permission-first execution)
+
+`POST /api/mo/authority/...` adds the missing execution controls on top of the existing approval engine:
+
+1. `capabilities/request` raises a normal MO approval (two-party, MFA for HIGH/CRITICAL, expiry) that records
+   the tool, action, resource and the hash of the arguments. The tier is at least what the tool's own risk needs.
+2. After it is approved, the requester collects a one-time grant (`grants`). Only the token's hash is stored.
+3. `execute` spends the grant atomically. It fails if the arguments, resource, action, tenant or approval tier differ.
+4. Forbidden actions (`withdraw_funds`, `disable_audit`, `mint_admin`, ...) are refused in code with or without a grant.
+5. Every outcome writes a receipt (success, failure or refusal). An idempotency key replays the stored receipt instead
+   of running the tool again; a refusal does not burn the key.
+6. Agents (`agents`) hold only an allow-list and a risk ceiling; the gateway enforces both.
+7. Releases move BUILD, SCAN, EVAL, approval, canary check, PROMOTE, with rollback to a previously promoted version.
+   A candidate that touches MO's authority code is stopped at SCAN.
+8. Dependencies are recorded with licence class; unknown, copyleft and proprietary ones are quarantined until reviewed.
+9. The vault issues leases instead of secrets.
+
+Not built: exchange connectors, a real desktop driver, production SSO, a container sandbox, canary traffic
+measurement, vulnerability scanning. The manifest lists each with its status.
+
 ## Governance you will notice
 
 - **The default run needs approval.** At autonomy level 1 even a LOW-risk step waits (`202 PENDING_APPROVAL`).

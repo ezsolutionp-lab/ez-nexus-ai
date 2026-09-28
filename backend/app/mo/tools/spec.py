@@ -259,6 +259,8 @@ def get_tool_registry() -> ToolRegistry:
         register_builtin_tools(_registry)
         from ..intelligence.tools import register_domain_tools
         register_domain_tools(_registry)
+        from ..authority.desktop import register_desktop_tool
+        register_desktop_tool(_registry)
     return _registry
 
 

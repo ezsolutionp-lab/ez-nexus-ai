@@ -91,10 +91,11 @@ app.include_router(auth_router)
 from .api import builder as _mo_builder          # noqa: E402
 from .api import mo_core as _mo_core             # noqa: E402
 from .api import platform as _mo_platform        # noqa: E402
+from .api import authority as _mo_authority      # noqa: E402
 from .api import voice as _mo_voice              # noqa: E402
 
 for _mo_router in _mo_core.ALL_ROUTERS + _mo_builder.ALL_ROUTERS + _mo_voice.ALL_ROUTERS \
-        + _mo_platform.ALL_ROUTERS:
+        + _mo_platform.ALL_ROUTERS + _mo_authority.ALL_ROUTERS:
     app.include_router(_mo_router)
 logger.info("MO control plane mounted at /api/mo")
 

@@ -713,3 +713,104 @@ PLATFORM_TABLES = [
     "mo_autonomy_policies", "mo_shadow_records", "mo_reversible_actions", "mo_protocol_peers",
     "mo_eval_runs",
 ]
+
+
+class CapabilityGrant(Base, TenantMixin):
+    """A one-time, argument-bound authorisation minted from a granted approval. Only the token's hash is stored."""
+
+    __tablename__ = "mo_capability_grants"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    approval_id = Column(String(64), nullable=False, index=True)
+    tool = Column(String(160), nullable=False)
+    action = Column(String(160), nullable=False)
+    resource = Column(String(500), nullable=False)
+    args_hash = Column(String(64), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+
+
+class ExecutionReceipt(Base, TenantMixin):
+    """Proof that a governed call ran (or was refused). Written for failures as well as successes."""
+
+    __tablename__ = "mo_receipts"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    trace_id = Column(String(64), nullable=False, index=True)
+    mission_id = Column(String(64), nullable=True, index=True)
+    tool = Column(String(160), nullable=False)
+    action = Column(String(160), nullable=False)
+    resource = Column(String(500), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    idempotency_key = Column(String(200), nullable=True)
+    grant_id = Column(String(64), nullable=True)
+    state = Column(String(32), nullable=False)
+    success = Column(Boolean, nullable=False)
+    output_hash = Column(String(64), nullable=False)
+    detail = Column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_mo_receipt_idem"),)
+
+
+class AgentDefinition(Base, TenantMixin):
+    """A registered agent and the only tools it may ask MO to run."""
+
+    __tablename__ = "mo_agents"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    allowed_tools_json = Column(Text, nullable=False, default="[]")
+    risk_ceiling = Column(String(16), nullable=False, default="WRITE")
+    status = Column(String(16), nullable=False, default="ACTIVE")    # ACTIVE | DISABLED
+
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_mo_agent_name"),)
+
+
+class AgentRelease(Base, TenantMixin):
+    """One version of an agent moving BUILD -> SCAN -> EVAL -> APPROVAL -> CANARY -> VERIFY -> PROMOTE."""
+
+    __tablename__ = "mo_agent_releases"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    agent_name = Column(String(120), nullable=False, index=True)
+    version = Column(String(64), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    manifest_hash = Column(String(64), nullable=False)
+    stage = Column(String(16), nullable=False, default="BUILD")
+    status = Column(String(16), nullable=False, default="IN_PROGRESS")   # IN_PROGRESS | STOPPED | PROMOTED | ROLLED_BACK
+    scan_json = Column(Text, nullable=True)
+    eval_run_id = Column(String(64), nullable=True)
+    eval_report_hash = Column(String(64), nullable=True)
+    approval_id = Column(String(64), nullable=True)
+    canary_json = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=False)
+    previous_release_id = Column(String(64), nullable=True)
+    stop_reason = Column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "agent_name", "version", name="uq_mo_release_version"),)
+
+
+class DependencyRecord(Base, TenantMixin):
+    """Provenance and licence review for a third-party dependency. Unknown or restricted means quarantined."""
+
+    __tablename__ = "mo_dependencies"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    name = Column(String(200), nullable=False)
+    version = Column(String(80), nullable=False)
+    source = Column(String(500), nullable=True)
+    license = Column(String(200), nullable=True)
+    license_class = Column(String(24), nullable=False, default="UNKNOWN")
+    license_text_hash = Column(String(64), nullable=True)
+    usage = Column(String(300), nullable=True)
+    attribution_required = Column(Boolean, nullable=False, default=True)
+    status = Column(String(16), nullable=False, default="QUARANTINED")   # QUARANTINED | APPROVED | REJECTED
+    review_notes = Column(Text, nullable=True)
+    reviewed_by = Column(String(64), nullable=True)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "name", "version", name="uq_mo_dependency"),)
+
+
+AUTHORITY_TABLES = ["mo_capability_grants", "mo_receipts", "mo_agents", "mo_agent_releases", "mo_dependencies"]

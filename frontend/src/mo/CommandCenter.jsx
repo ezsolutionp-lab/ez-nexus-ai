@@ -11,9 +11,10 @@ import React, { useCallback, useEffect, useState } from 'react'
 
 const API = import.meta.env.VITE_API_URL || ''
 const BASE = '/api/mo/platform'
+const AUTH_BASE = '/api/mo/authority'
 
-async function call(path, { method = 'GET', body, token } = {}) {
-  const response = await fetch(`${API}${BASE}${path}`, {
+async function call(path, { method = 'GET', body, token, base = BASE } = {}) {
+  const response = await fetch(`${API}${base}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -241,10 +242,26 @@ function ProtocolsPanel({ token }) {
   )
 }
 
+function AuthorityPanel({ token }) {
+  const [res, run, busy] = useAction(token)
+  const get = path => run(path, { base: AUTH_BASE })
+  return (
+    <Panel title="Authority" note="Read-only views. Approvals are decided in the approvals queue, never here; grant tokens are shown once to the requester.">
+      <button disabled={busy} onClick={() => get('/policy')}>Policy and deny-list</button>
+      <button disabled={busy} onClick={() => get('/receipts')}>Receipts</button>
+      <button disabled={busy} onClick={() => get('/agents')}>Agents</button>
+      <button disabled={busy} onClick={() => get('/releases')}>Releases</button>
+      <button disabled={busy} onClick={() => get('/compliance/dependencies?status=QUARANTINED')}>Quarantined dependencies</button>
+      <button disabled={busy} onClick={() => get('/compliance/gate')}>Compliance gate</button>
+      <Result res={res} />
+    </Panel>
+  )
+}
+
 const PANELS = [
   ['manifest', 'Capabilities', ManifestPanel], ['knowledge', 'Knowledge', KnowledgePanel],
   ['memory', 'Memory', MemoryPanel], ['runs', 'Runs', RunsPanel], ['autonomy', 'Autonomy', AutonomyPanel],
-  ['domain', 'Domain tools', DomainPanel], ['evals', 'Evals', EvalsPanel], ['protocols', 'Protocols', ProtocolsPanel],
+  ['domain', 'Domain tools', DomainPanel], ['evals', 'Evals', EvalsPanel], ['protocols', 'Protocols', ProtocolsPanel], ['authority', 'Authority', AuthorityPanel],
 ]
 
 export default function CommandCenter({ token }) {
