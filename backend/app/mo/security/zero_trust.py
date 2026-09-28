@@ -77,6 +77,12 @@ RATE_LIMITS: dict[str, int] = {
 }
 
 
+def hit_bucket(bucket: str, key: str) -> bool:
+    """Charge one hit to a named bucket outside a request dependency (e.g. per voice build)."""
+    allowed, _ = limiter.hit(f"{bucket}:{key}", RATE_LIMITS.get(bucket, 60))
+    return allowed
+
+
 def rate_limit(bucket: str = "read") -> Callable:
     """Dependency factory applying a named rate-limit bucket."""
 

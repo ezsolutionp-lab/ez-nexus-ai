@@ -481,3 +481,57 @@ MO_FOUNDATION_TABLES = [
     "mo_tenants", "mo_audit_events", "mo_tools", "mo_agent_manifests",
     "mo_events", "mo_approvals",
 ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice (JARVIS console) — durable conversation state
+# ─────────────────────────────────────────────────────────────────────────────
+
+class VoiceSession(Base, TenantMixin):
+    """
+    One continuous conversation with MO.
+
+    Durable, unlike the legacy Twilio flow's in-process dict: a restart or a
+    second worker does not lose the conversation, and `awake_until` lets a user
+    keep talking without repeating the wake phrase inside the follow-up window.
+    """
+
+    __tablename__ = "mo_voice_sessions"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    actor_id = Column(String(64), nullable=False, index=True)
+    channel = Column(String(24), nullable=False, default="BROWSER")   # BROWSER | PHONE
+    language = Column(String(16), nullable=False, default="en-US")
+    status = Column(String(16), nullable=False, default="ACTIVE")     # ACTIVE | ENDED
+    awake_until = Column(DateTime, nullable=True)
+    # Conversational context carried between turns.
+    focus_project_id = Column(String(64), nullable=True)
+    pending_intent = Column(String(80), nullable=True)
+    pending_slots_json = Column(Text, nullable=False, default="{}")
+    last_response = Column(Text, nullable=True)
+    turn_count = Column(Integer, nullable=False, default=0)
+    ended_at = Column(DateTime, nullable=True)
+
+
+class VoiceTurn(Base, TenantMixin):
+    """One utterance and MO's reply — the conversation transcript."""
+
+    __tablename__ = "mo_voice_turns"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    session_id = Column(String(64), ForeignKey("mo_voice_sessions.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    seq = Column(Integer, nullable=False)
+    transcript = Column(Text, nullable=False)
+    wake_detected = Column(Boolean, nullable=False, default=False)
+    intent = Column(String(80), nullable=True)
+    confidence = Column(Float, nullable=True)
+    slots_json = Column(Text, nullable=False, default="{}")
+    result_state = Column(String(40), nullable=False)
+    reply = Column(Text, nullable=False)
+    latency_ms = Column(Integer, nullable=True)
+
+    __table_args__ = (UniqueConstraint("session_id", "seq", name="uq_voice_turn_seq"),)
+
+
+VOICE_TABLES = ["mo_voice_sessions", "mo_voice_turns"]

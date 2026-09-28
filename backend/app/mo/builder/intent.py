@@ -173,9 +173,22 @@ _NAME_STOPWORDS = {
 
 
 def _derive_name(prompt: str) -> str:
-    """Take a readable project name from the opening clause of the prompt."""
+    """Take a readable project name from the opening clause of the prompt.
+
+    "a website for a plumbing company" reads as a *Plumbing Company Website*,
+    so a "<thing> for <subject>" clause is reordered subject-first rather than
+    producing "Website Plumbing Company".
+    """
     head = re.split(r"[.\n,]|\bwith\b|\bthat\b|\bincluding\b", prompt.strip(), maxsplit=1)[0]
-    words = [w for w in re.findall(r"[A-Za-z0-9]+", head) if w.lower() not in _NAME_STOPWORDS]
+
+    def meaningful(text: str) -> list[str]:
+        return [w for w in re.findall(r"[A-Za-z0-9]+", text) if w.lower() not in _NAME_STOPWORDS]
+
+    thing, sep, subject = head.partition(" for ")
+    if sep:
+        words = meaningful(subject) + meaningful(thing)
+    else:
+        words = meaningful(head)
     if not words:
         return "MO Project"
     return " ".join(w.capitalize() for w in words[:6])

@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import BuilderStudio from './mo/BuilderStudio.jsx'
+import JarvisConsole from './mo/JarvisConsole.jsx'
 import { createRoot } from 'react-dom/client'
 import './style.css'
 import { LangProvider, useLang, LANG_LIST } from './i18n.jsx'
@@ -6572,6 +6573,11 @@ function CallTrackTab() {
 // ── MO NEXUS OMEGA — Builder Studio tab ───────────────────────────────────────
 // Wrapper so the Studio reads the auth token from the existing context without
 // changing AppInner's state or destructuring.
+function MoJarvisTab() {
+  const { token } = useAuth()
+  return <JarvisConsole token={token} />
+}
+
 function MoBuilderTab() {
   const { token } = useAuth()
   return <BuilderStudio token={token} />
@@ -6629,6 +6635,7 @@ function AppInner() {
     { id: 'marketplace',     label: '🏪 DME Market' },
     { id: 'agents',          label: '🤖 Agents' },
     { id: 'commander',       label: '🤖 Commander AI' },
+    { id: 'mo-jarvis',       label: '🎙️ Talk to MO' },
     { id: 'mo-builder',      label: '🏗️ MO Builder Studio' },
     { id: 'website-builder', label: '🖥️ Website Builder' },
     { id: 'content-studio',  label: '🎬 Content Studio' },
@@ -6721,6 +6728,7 @@ function AppInner() {
         {activeTab === 'marketplace'     && <DMEMarketplaceTab />}
         {activeTab === 'agents'          && <AgentsTab />}
         {activeTab === 'commander'       && <CommanderTab />}
+        {activeTab === 'mo-jarvis'       && <MoJarvisTab />}
         {activeTab === 'mo-builder'      && <MoBuilderTab />}
         {activeTab === 'website-builder' && <WebsiteBuilderTab />}
         {activeTab === 'content-studio'  && <ContentStudioTab />}
