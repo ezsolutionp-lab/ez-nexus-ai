@@ -9,6 +9,8 @@ from app.mo.db import MemoryRecord
 from app.mo.errors import ResultState
 from app.mo.memory.store import KINDS, MemoryStore
 
+FAKE_AWS_KEY = "AK" + "IA" + "ABCDEFGHIJKLMNOP"   # built at runtime so no credential-shaped literal is committed
+
 pytestmark = pytest.mark.regression
 
 
@@ -31,7 +33,7 @@ def test_unknown_kind_and_empty_content_fail(db, ctx):
 
 def test_secrets_are_refused_and_never_stored(db, ctx):
     m = MemoryStore(db, ctx)
-    res = m.remember("LONG_TERM", "the aws key is AKIAABCDEFGHIJKLMNOP remember it")
+    res = m.remember("LONG_TERM", "the aws key is " + FAKE_AWS_KEY + " remember it")
     assert res.state is ResultState.POLICY_DENIED
     assert db.query(MemoryRecord).count() == 0
 

@@ -6,6 +6,8 @@ import warnings
 
 import pytest
 
+FAKE_AWS_KEY = "AK" + "IA" + "ABCDEFGHIJKLMNOP"   # built at runtime so no credential-shaped literal is committed
+
 warnings.filterwarnings("ignore")
 
 pytestmark = pytest.mark.regression
@@ -132,9 +134,9 @@ def test_knowledge_is_tenant_isolated(app_and_client, auth, other):
 
 def test_secret_in_document_is_not_ingested_silently(app_and_client, auth):
     _, c, _ = app_and_client
-    r = c.post(P + "/knowledge/docs", headers=auth, json={"title": "keys", "text": "aws key AKIAABCDEFGHIJKLMNOP here"})
+    r = c.post(P + "/knowledge/docs", headers=auth, json={"title": "keys", "text": "aws key " + FAKE_AWS_KEY + " here"})
     listed = c.get(P + "/knowledge/docs", headers=auth).text
-    assert "AKIAABCDEFGHIJKLMNOP" not in listed and "AKIAABCDEFGHIJKLMNOP" not in r.text
+    assert FAKE_AWS_KEY not in listed and FAKE_AWS_KEY not in r.text
 
 
 def test_input_limits(app_and_client, auth):
@@ -161,8 +163,8 @@ def test_memory_roundtrip_private_by_default_and_erase(app_and_client, auth, mem
 
 def test_memory_refuses_secrets(app_and_client, auth):
     _, c, _ = app_and_client
-    r = c.post(P + "/memory", headers=auth, json={"kind": "WORKING", "content": "password is hunter2 and key AKIAABCDEFGHIJKLMNOP"})
-    assert r.status_code >= 400 or "AKIAABCDEFGHIJKLMNOP" not in str(
+    r = c.post(P + "/memory", headers=auth, json={"kind": "WORKING", "content": "password is hunter2 and key " + FAKE_AWS_KEY})
+    assert r.status_code >= 400 or FAKE_AWS_KEY not in str(
         c.post(P + "/memory/recall", headers=auth, json={"query": "password key"}).json())
 
 

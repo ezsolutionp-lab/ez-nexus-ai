@@ -6,6 +6,8 @@ from app.mo.context import RequestContext
 from app.mo.errors import ResultState
 from app.mo.knowledge.service import KnowledgeService, chunk_text
 
+FAKE_AWS_KEY = "AK" + "IA" + "ABCDEFGHIJKLMNOP"   # built at runtime so no credential-shaped literal is committed
+
 pytestmark = pytest.mark.regression
 
 POLICY = ("Refunds are issued within 14 days of purchase. Customers must provide the original receipt. "
@@ -36,7 +38,7 @@ def test_long_documents_split_into_overlapping_chunks():
 
 
 def test_secrets_are_refused_and_pii_is_redacted_before_indexing(svc):
-    blocked = svc.ingest("keys", "Deploy with key AKIAABCDEFGHIJKLMNOP now.")
+    blocked = svc.ingest("keys", "Deploy with key " + FAKE_AWS_KEY + " now.")
     assert blocked.state is ResultState.POLICY_DENIED
     ok = svc.ingest("contact", "Reach the office manager at boss@example.com for scheduling help please.")
     assert ok.state.is_success and "EMAIL" in ok.data["redactions"]
