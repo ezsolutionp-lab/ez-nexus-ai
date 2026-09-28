@@ -432,8 +432,8 @@ class BuilderCompiler:
 
     def execute_deployment(self, deployment_id: str) -> MoResult:
         """
-        Runs only with a granted approval — and then reports honestly that no
-        deployment provider adapter is wired, rather than claiming a deploy.
+        Runs only with a granted approval — then hands off to the selected adapter, or reports
+        honestly that none is selected, rather than claiming a deploy.
         """
         deployment = self.db.get(BuilderDeployment, deployment_id)
         if deployment is None:
@@ -446,10 +446,25 @@ class BuilderCompiler:
                 "This deployment has no granted, unexpired approval. It will not proceed.",
             )
 
+        from .deploy import selected_adapter
+        adapter = selected_adapter()
+        if adapter is not None:
+            project = self.db.get(BuilderProject, deployment.project_id)
+            result = adapter.deploy(self.db, self.ctx, project, deployment)
+            deployment.state, deployment.detail = result.state.value, result.detail
+            if result.state is ResultState.SUCCESS:
+                deployment.deployed_at = datetime.utcnow()
+            self.db.flush()
+            chain.record(self.db, self.ctx, action="builder.deploy.execute", result_state=result.state,
+                         resource_type="deployment", resource_id=deployment.id,
+                         detail=f"{adapter.name}: {result.detail}"[:400])
+            result.meta.update(deployment_id=deployment.id, adapter=adapter.name)
+            return result
+
         deployment.state = ResultState.CREDENTIAL_REQUIRED.value
         deployment.detail = (
-            "Approval verified. No deployment provider adapter is implemented in this build, "
-            "so nothing was deployed. Configure a deployment target adapter to complete this step."
+            "Approval verified. No deployment adapter is selected (set MO_DEPLOY_ADAPTER to export-bundle or "
+            "deploy-hook), so nothing was deployed."
         )
         self.db.flush()
         chain.record(self.db, self.ctx, action="builder.deploy.execute",

@@ -105,6 +105,19 @@ for _mo_router in _mo_core.ALL_ROUTERS + _mo_builder.ALL_ROUTERS + _mo_voice.ALL
 logger.info("MO control plane mounted at /api/mo")
 
 
+@app.on_event("startup")
+def _recover_background_runs() -> None:
+    from .database import SessionLocal
+    from .mo.orchestration.background import recover_interrupted
+    db = SessionLocal()
+    try:
+        n = recover_interrupted(db)
+        if n:
+            logger.warning("Marked %d interrupted background run(s) FAILED so they can be resumed.", n)
+    finally:
+        db.close()
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @app.get("/", tags=["health"])

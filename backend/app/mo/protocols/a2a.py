@@ -34,7 +34,7 @@ from ..audit import chain
 from ..context import RequestContext
 from ..errors import MoResult, ResultState
 from ..tools.spec import ToolRegistry, get_tool_registry
-from .netguard import check_url
+from .netguard import check_url, pinned_client
 from .peers import HIDDEN_KINDS_FOR_A2A, PeerRegistry, _entries
 
 REPLAY_WINDOW_SECONDS = 300
@@ -168,7 +168,7 @@ def send_task(db: Session, ctx: RequestContext, peer_name: str, tool: str, paylo
         return MoResult(ResultState.POLICY_DENIED, blocked)
     env = build_envelope(secret, peer_name, tool, payload)
     try:
-        with httpx.Client(timeout=timeout, transport=transport, follow_redirects=False) as http:
+        with pinned_client(timeout=timeout, transport=transport) as http:
             resp = http.post(row.url, json=env)
     except httpx.TimeoutException:
         return MoResult(ResultState.TIMEOUT, f"A2A peer did not answer within {timeout}s.")

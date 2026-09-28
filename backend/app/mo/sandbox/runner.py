@@ -16,6 +16,13 @@ network but does not stop a determined process from opening a socket. Running
 untrusted third-party code at production scale needs a container runtime with
 network policy. `SandboxProfile.isolation_level` reports which level is actually
 in force so callers cannot mistake one for the other.
+
+CONTAINER MODE: set MO_SANDBOX_MODE=container and commands run under `docker run` instead: no
+network unless the profile asks for it, all capabilities dropped, no-new-privileges, a non-root user, a
+read-only root filesystem with a small tmpfs, memory / CPU / pids limits, and the workspace as the only writable
+mount. If the runtime is not reachable the run FAILS (exit 126, isolation UNAVAILABLE) — it never falls back to
+process-level isolation. The image (MO_SANDBOX_IMAGE, default python:3.11-slim) must contain the toolchain the
+command needs. Tested against a fake `docker` and, when a daemon is present, a live one.
 """
 
 from __future__ import annotations
@@ -64,6 +71,8 @@ class SandboxProfile:
     @property
     def isolation_level(self) -> str:
         """What this profile actually enforces. Never overstated."""
+        if container_mode():
+            return "CONTAINER" if container_available() else "UNAVAILABLE"
         if resource is None:
             return "PROCESS_NO_RLIMIT"
         return "PROCESS_RLIMIT"
@@ -109,6 +118,66 @@ class SandboxResult:
                 meta=self.to_dict(),
             )
         return MoResult.ok({"stage": stage}, **self.to_dict())
+
+
+def container_mode() -> bool:
+    return os.getenv("MO_SANDBOX_MODE", "").strip().lower() == "container"
+
+
+def container_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        return subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"], capture_output=True, timeout=10).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def container_argv(command: Sequence[str], workspace: Path, profile: "SandboxProfile", name: str) -> list[str]:
+    argv = ["docker", "run", "--rm", "--name", name, "--interactive",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+            "--user", "65534:65534",
+            "--memory", f"{profile.memory_mb}m", "--memory-swap", f"{profile.memory_mb}m",
+            "--cpus", "2", "--pids-limit", str(profile.max_processes),
+            "--ulimit", f"fsize={profile.max_file_size_mb * 1024 * 1024}",
+            "--volume", f"{workspace}:/workspace:rw", "--workdir", "/workspace",
+            "--env", "HOME=/workspace/.tmp", "--env", "TMPDIR=/workspace/.tmp", "--env", "PYTHONDONTWRITEBYTECODE=1"]
+    if not profile.network:
+        argv += ["--network", "none"]
+    for k, v in profile.extra_env.items():
+        argv += ["--env", f"{k}={v}"]
+    return argv + [os.getenv("MO_SANDBOX_IMAGE", "python:3.11-slim"), *command]
+
+
+def _run_container(command: Sequence[str], workspace: Path, profile: "SandboxProfile",
+                   stdin_text: Optional[str]) -> "SandboxResult":
+    started = time.perf_counter()
+    if not container_available():
+        return SandboxResult(
+            command=list(command), exit_code=126, stdout="",
+            stderr="[sandbox] container mode is on but no container runtime is reachable; refusing to fall back to "
+                   "process-level isolation.", duration_ms=0, timed_out=False, peak_rss_kb=None, truncated=False,
+            isolation_level="UNAVAILABLE")
+    name = f"mo-sbx-{os.getpid()}-{int(time.time() * 1000)}"
+    timed_out = False
+    try:
+        proc = subprocess.run(container_argv(command, workspace, profile, name), capture_output=True, text=True,
+                              input=stdin_text, timeout=profile.wall_timeout_seconds)
+        exit_code, stdout, stderr = proc.returncode, proc.stdout or "", proc.stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        timed_out, exit_code = True, None
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=30)        # killing the CLI would not stop it
+        stdout = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = f"[sandbox] container killed after {profile.wall_timeout_seconds}s wall-clock timeout"
+    truncated = False
+    if len(stdout) > profile.max_output_bytes:
+        stdout, truncated = stdout[: profile.max_output_bytes] + "\n[sandbox] stdout truncated", True
+    if len(stderr) > profile.max_output_bytes:
+        stderr, truncated = stderr[: profile.max_output_bytes] + "\n[sandbox] stderr truncated", True
+    return SandboxResult(command=list(command), exit_code=exit_code, stdout=stdout, stderr=stderr,
+                         duration_ms=int((time.perf_counter() - started) * 1000), timed_out=timed_out,
+                         peak_rss_kb=None, truncated=truncated, isolation_level="CONTAINER")
 
 
 def _build_env(profile: SandboxProfile, workspace: Path) -> dict[str, str]:
@@ -161,6 +230,8 @@ def run(
     workspace = Path(workspace).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / ".tmp").mkdir(exist_ok=True)
+    if container_mode():
+        return _run_container(command, workspace, profile, stdin_text)
 
     env = _build_env(profile, workspace)
     started = time.perf_counter()

@@ -261,6 +261,11 @@ def get_tool_registry() -> ToolRegistry:
         register_domain_tools(_registry)
         from ..authority.desktop import register_desktop_tool
         register_desktop_tool(_registry)
+        from ..browser.adapter import register_browser_tools
+        register_browser_tools(_registry)
+        from ..connectors.market_data import register_market_tools, register_vision_tool
+        register_market_tools(_registry)
+        register_vision_tool(_registry)
     return _registry
 
 

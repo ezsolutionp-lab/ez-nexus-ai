@@ -185,12 +185,13 @@ class ProviderEmbedder(Embedder):
         self.name = f"provider:{model}"
 
     def embed_many(self, texts: Sequence[str]) -> list[dict[int, float]]:
+        from ..protocols.netguard import pinned_client
         import httpx
         out: list[dict[int, float]] = []
         for i in range(0, len(texts), self.MAX_BATCH):
             batch = [t[:8000] for t in texts[i:i + self.MAX_BATCH]]
             try:
-                with httpx.Client(timeout=self.timeout, transport=self.transport) as http:
+                with pinned_client(timeout=self.timeout, transport=self.transport) as http:
                     resp = http.post(f"{self.base_url}/embeddings", json={"model": self.model, "input": batch},
                                      headers={"Authorization": f"Bearer {self.api_key}"})
             except httpx.HTTPError as exc:

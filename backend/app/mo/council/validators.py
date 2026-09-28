@@ -6,7 +6,8 @@ risk of what was done; a mandatory validator that cannot run FAILS (it does not 
 so missing evidence never counts as a pass.
 
   facts     claims are supported by supplied evidence (lexical grounding; see truth.verifier)
-  code      Python source parses. Syntax only — running tests needs a real sandbox provider
+  code      Python source parses; with supplied tests they run under pytest in the build sandbox
+            (process-level isolation unless MO_SANDBOX_MODE=container)
   security  no secret / PII in the output and no prompt-injection markers
   quality   the caller's acceptance criteria hold
   receipt   claimed work matches runtime receipts (exist, same tenant, succeeded, hash matches)
@@ -94,14 +95,35 @@ def check_security(output: Any) -> dict[str, Any]:
         _pass("security", "No secret, PII or injection markers found.")
 
 
-def check_code(code: Optional[str]) -> dict[str, Any]:
+def check_code(code: Optional[str], tests: Optional[str] = None) -> dict[str, Any]:
+    """Syntax check; with `tests`, also run them with pytest in the build sandbox and report its isolation level."""
     if code is None:
         return _skip("code", "No code was supplied.")
     try:
         ast.parse(code)
+        if tests is not None:
+            ast.parse(tests)
     except SyntaxError as exc:
         return _fail("code", f"Syntax error at line {exc.lineno}: {exc.msg}")
-    return _pass("code", "Parses as Python. Syntax only: tests were not run (no sandbox provider).")
+    if tests is None:
+        return _pass("code", "Parses as Python. Syntax only: no tests were supplied to run.")
+    from ..sandbox import runner
+    ws = runner.temp_workspace()
+    try:
+        (ws / "candidate.py").write_text(code)
+        (ws / "test_candidate.py").write_text(tests)
+        res = runner.run([runner.python_executable() if not runner.container_mode() else "python", "-m", "pytest", "-q",
+                          "-p", "no:cacheprovider", "test_candidate.py"], ws,
+                         runner.SandboxProfile(name="COUNCIL_TESTS", wall_timeout_seconds=60, cpu_seconds=30, memory_mb=512))
+    finally:
+        import shutil
+        shutil.rmtree(ws, ignore_errors=True)
+    tail = " / ".join((res.stdout or res.stderr).strip().splitlines()[-3:])
+    if res.timed_out:
+        return _fail("code", "Tests timed out.", isolation=res.isolation_level)
+    if not res.ok:
+        return _fail("code", f"Tests failed (exit {res.exit_code}): {tail}", isolation=res.isolation_level)
+    return _pass("code", f"Tests passed in a sandbox ({res.isolation_level}): {tail}", isolation=res.isolation_level)
 
 
 def check_facts(answer: Optional[str], evidence: Optional[list]) -> dict[str, Any]:
@@ -139,11 +161,12 @@ def check_receipts(db: Session, ctx: RequestContext, claimed: Optional[list]) ->
 
 def run_council(db: Session, ctx: RequestContext, *, risk: Risk = Risk.NONE, output: Any = None,
                 acceptance: Optional[list] = None, answer: Optional[str] = None, evidence: Optional[list] = None,
-                code: Optional[str] = None, claimed_receipts: Optional[list] = None) -> dict[str, Any]:
+                code: Optional[str] = None, tests: Optional[str] = None,
+                claimed_receipts: Optional[list] = None) -> dict[str, Any]:
     ran = {
         "quality": check_quality(output, acceptance),
         "security": check_security(output),
-        "code": check_code(code),
+        "code": check_code(code, tests),
         "facts": check_facts(answer, evidence),
         "receipt": check_receipts(db, ctx, claimed_receipts),
     }

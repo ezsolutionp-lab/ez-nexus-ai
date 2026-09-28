@@ -363,3 +363,21 @@ def test_desktop_dry_run_describes_without_acting_and_adapter_hook_works(db, ctx
         assert reg.invoke(dctx, "desktop.act", {"action": ACTION}, approval_granted=True).data == {"typed": True}
     finally:
         desktop.clear_adapters()
+
+
+def test_council_runs_supplied_tests_in_the_sandbox(db, ctx):
+    ok = run_council(db, ctx, risk=Risk.NONE, output="x", acceptance=[{"type": "contains", "value": "x"}],
+                     code="def add(a, b):\n    return a + b\n",
+                     tests="from candidate import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    code = next(r for r in ok["results"] if r["validator"] == "code")
+    assert ok["passed"] and "Tests passed in a sandbox" in code["detail"] and code["isolation"].startswith("PROCESS")
+
+
+def test_council_fails_when_supplied_tests_fail_or_hang(db, ctx):
+    bad = run_council(db, ctx, risk=Risk.NONE, output="x", acceptance=[{"type": "contains", "value": "x"}],
+                      code="def add(a, b):\n    return a - b\n",
+                      tests="from candidate import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+    assert "code" in bad["failed"] and "Tests failed" in next(r for r in bad["results"] if r["validator"] == "code")["detail"]
+    broken = run_council(db, ctx, risk=Risk.NONE, output="x", acceptance=[{"type": "contains", "value": "x"}],
+                         code="x = 1\n", tests="def test_(:\n")
+    assert "code" in broken["failed"] and "Syntax error" in next(r for r in broken["results"] if r["validator"] == "code")["detail"]

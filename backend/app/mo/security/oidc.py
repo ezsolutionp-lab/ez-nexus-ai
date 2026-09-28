@@ -26,7 +26,7 @@ import httpx
 import jwt
 
 from ..errors import MoResult, ResultState
-from ..protocols.netguard import check_url
+from ..protocols.netguard import check_url, pinned_client
 
 ALLOWED_ALGS = ("RS256", "RS384", "RS512", "ES256", "ES384", "PS256")
 JWKS_TTL_SECONDS = 600
@@ -69,7 +69,7 @@ def _jwks(cfg: OidcConfig, *, force: bool = False) -> dict[str, Any]:
         return cached[1]
     if (blocked := check_url(cfg.jwks_url)):
         raise RuntimeError(blocked)
-    with httpx.Client(timeout=10.0, transport=transport, follow_redirects=False) as http:
+    with pinned_client(timeout=10.0, transport=transport) as http:
         resp = http.get(cfg.jwks_url)
     if resp.status_code != 200 or len(resp.content) > MAX_JWKS_BYTES:
         raise RuntimeError(f"the identity provider's key set is unavailable (HTTP {resp.status_code})")

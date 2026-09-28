@@ -16,7 +16,7 @@ from ..errors import MoResult, ResultState
 from ..tools.spec import RiskLevel, ToolRegistry, ToolSpec
 from ..modelfabric.context import ContextPolicy, compress
 from ..truth import verify_claims
-from . import commercial, planning, router, text, timeseries
+from . import business_box, commercial, planning, router, text, timeseries, verticals
 
 SCOPE = "domain:run"
 
@@ -123,6 +123,40 @@ _TOOLS: list[tuple[str, str, Callable, dict]] = [
     ("domain.compress_context", "Shrink a long conversation to fit a token budget with an extractive summary.",
      _compress,
      {"properties": {"messages": _ARR, "policy": _OBJ}, "required": ["messages"]}),
+    ("domain.cell_health", "Classify cell/RAN KPIs (PRB use, drops, availability, throughput) as healthy, degraded or critical.",
+     lambda p: verticals.cell_health(p["cells"]),
+     {"properties": {"cells": _ARR}, "required": ["cells"]}),
+    ("domain.capacity_breach", "Forecast utilisation and report when it will cross a threshold.",
+     lambda p: verticals.capacity_breach(p["utilization"], p.get("threshold", 0.8), p.get("horizon", 90), p.get("season", 0)),
+     {"properties": {"utilization": _ARR, "threshold": {"type": "number"}, "horizon": {"type": "integer"}, "season": {"type": "integer"}},
+      "required": ["utilization"]}),
+    ("domain.root_cause", "Rank probable network root causes from a topology (child->parent) and the alarmed nodes.",
+     lambda p: verticals.root_cause(p["topology"], p["alarms"], p.get("customers")),
+     {"properties": {"topology": _OBJ, "alarms": _ARR, "customers": _OBJ}, "required": ["topology", "alarms"]}),
+    ("domain.hotel_kpis", "Occupancy, ADR, RevPAR and TRevPAR from supplied figures.",
+     lambda p: verticals.hotel_kpis(p["rooms_available"], p["rooms_sold"], p["room_revenue"], p.get("total_revenue")),
+     {"properties": {"rooms_available": {"type": "number"}, "rooms_sold": {"type": "number"}, "room_revenue": {"type": "number"},
+                     "total_revenue": {"type": "number"}}, "required": ["rooms_available", "rooms_sold", "room_revenue"]}),
+    ("domain.overbooking", "Expected-cost-minimising overbooking level for a room block (binomial show-up model).",
+     lambda p: verticals.overbooking(p["capacity"], p["no_show_rate"], p["room_rate"], p["walk_cost"], p.get("max_extra", 50)),
+     {"properties": {"capacity": {"type": "integer"}, "no_show_rate": {"type": "number"}, "room_rate": {"type": "number"},
+                     "walk_cost": {"type": "number"}, "max_extra": {"type": "integer"}},
+      "required": ["capacity", "no_show_rate", "room_rate", "walk_cost"]}),
+    ("domain.deal_risk", "Transparent risk score for a sales deal, with the factors behind it.",
+     lambda p: verticals.deal_risk(p["deal"]), {"properties": {"deal": _OBJ}, "required": ["deal"]}),
+    ("domain.renewal_risk", "Transparent churn/renewal risk score for an account, with the factors behind it.",
+     lambda p: verticals.renewal_risk(p["account"]), {"properties": {"account": _OBJ}, "required": ["account"]}),
+    ("domain.revenue_leakage", "Reconcile contract terms against invoices to find unbilled, under- and over-billed items.",
+     lambda p: verticals.revenue_leakage(p["contracts"], p["invoices"], p.get("tolerance", 0.005)),
+     {"properties": {"contracts": _ARR, "invoices": _ARR, "tolerance": {"type": "number"}}, "required": ["contracts", "invoices"]}),
+    ("domain.cvss", "CVSS v3.1 base score and severity from a vector string.",
+     lambda p: verticals.cvss_base(p["vector"]), {"properties": {"vector": {"type": "string"}}, "required": ["vector"]}),
+    ("domain.triage_incidents", "Correlate security events per asset and rank incidents; containment is suggested, never executed.",
+     lambda p: verticals.triage_incidents(p["events"], p.get("window_minutes", 30)),
+     {"properties": {"events": _ARR, "window_minutes": {"type": "number"}}, "required": ["events"]}),
+    ("domain.business_blueprint", "Vertical business-in-a-box blueprint (modules, roles, agents, KPIs, compliance prompts) and a Builder prompt.",
+     lambda p: business_box.blueprint(p["vertical"], p.get("business_name", "")),
+     {"properties": {"vertical": {"type": "string"}, "business_name": {"type": "string"}}, "required": ["vertical"]}),
     ("domain.briefing", "Order pending items into a briefing, holding non-urgent ones during quiet hours.",
      _briefing,
      {"properties": {"items": _ARR, "now": {"type": "string"}, "quiet_start": {"type": "string"},

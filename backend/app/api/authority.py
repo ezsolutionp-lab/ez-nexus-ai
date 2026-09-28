@@ -75,6 +75,7 @@ class CouncilIn(BaseModel):
     answer: Optional[str] = Field(default=None, max_length=200_000)
     evidence: Optional[list[dict[str, Any]]] = Field(default=None, max_length=200)
     code: Optional[str] = Field(default=None, max_length=200_000)
+    tests: Optional[str] = Field(default=None, max_length=200_000)
     claimed_receipts: Optional[list[Any]] = Field(default=None, max_length=100)
 
 
@@ -213,7 +214,7 @@ def council(body: CouncilIn, ctx: RequestContext = Depends(resolve_context), db:
     if risk is None:
         return _bad_risk()
     return run_council(db, ctx, risk=risk, output=body.output, acceptance=body.acceptance, answer=body.answer,
-                       evidence=body.evidence, code=body.code, claimed_receipts=body.claimed_receipts)
+                       evidence=body.evidence, code=body.code, tests=body.tests, claimed_receipts=body.claimed_receipts)
 
 
 # ── agents & releases ───────────────────────────────────────────────────────

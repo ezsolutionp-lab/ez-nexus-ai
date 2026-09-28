@@ -25,7 +25,7 @@ from typing import Any, Optional
 import httpx
 
 from ..errors import MoResult, ResultState
-from .netguard import check_url
+from .netguard import check_url, pinned_client
 
 PROTOCOL_VERSION = "2025-03-26"
 MAX_RESPONSE_BYTES = 1_000_000
@@ -79,7 +79,7 @@ class McpClient:
             self._next_id += 1
             body["id"] = self._next_id
         try:
-            with httpx.Client(timeout=self.timeout, transport=self._transport, follow_redirects=False) as http:
+            with pinned_client(timeout=self.timeout, transport=self._transport) as http:
                 resp = http.post(self.url, json=body, headers=self._headers())
         except httpx.TimeoutException:
             return MoResult(ResultState.TIMEOUT, f"MCP server did not answer '{method}' within {self.timeout}s.")

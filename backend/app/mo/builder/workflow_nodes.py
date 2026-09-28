@@ -28,7 +28,7 @@ from ..approvals import engine as approvals
 from ..db import BuilderWorkflow, KeyValueEntry
 from ..errors import MoResult, ResultState
 from ..guards import pipeline
-from ..protocols.netguard import check_url
+from ..protocols.netguard import check_url, pinned_client
 
 MAX_STEPS = 500
 MAX_DEPTH = 5
@@ -122,7 +122,7 @@ def _http(env: Env, node: dict, *, method: str, signed: bool) -> MoResult:
         headers["X-MO-Signature"] = "sha256=" + hmac.new(key.encode(), content or b"", hashlib.sha256).hexdigest()
     timeout = min(float(node.get("timeout_seconds", 10)), 15.0)
     try:
-        with httpx.Client(timeout=timeout, transport=env.transport, follow_redirects=False) as http:
+        with pinned_client(timeout=timeout, transport=env.transport) as http:
             resp = http.request(method, url, headers=headers, content=content)
     except httpx.TimeoutException:
         return MoResult(ResultState.TIMEOUT, f"{method} {url} timed out after {timeout}s.")

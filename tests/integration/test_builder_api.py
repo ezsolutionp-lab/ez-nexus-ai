@@ -85,7 +85,8 @@ def test_builder_status_reports_capabilities_truthfully(app_and_client, auth):
     assert "nextjs_fastapi" in body["stacks"]["planned"]
     assert body["requirement_engine"] == "RULE_BASED"
     assert body["model_fabric"]["any_configured"] is False
-    assert body["deployment"]["adapters_implemented"] == []
+    assert body["deployment"]["adapters_implemented"] == ["deploy-hook", "export-bundle"]
+    assert body["deployment"]["active"] is None
     blocked = {t["name"] for t in body["tools"] if not t["credential_satisfied"]}
     assert "comms.send_email" in blocked
 

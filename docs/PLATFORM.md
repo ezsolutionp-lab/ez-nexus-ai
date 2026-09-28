@@ -44,6 +44,36 @@ those, tenant-scoped, and audited. The API lives under `/api/mo/platform` and th
 Not built: exchange connectors, a real desktop driver, production SSO, a container sandbox, canary traffic
 measurement, vulnerability scanning. The manifest lists each with its status.
 
+## Security hardening and remaining capabilities
+
+- **Authentication on the original routes.** `app/legacy_gate.py` is an application-level dependency: every route outside
+  `/api/mo` needs a bearer token except a short allow-list (`/`, login, register, SSO exchange, public lead forms,
+  emailed approval links, media links). Twilio webhooks need a valid signature; patient routes are admin-only and audited;
+  `/ws` needs `?token=`. The frontend attaches the stored token to every call and reopens sign-in on a 401.
+- **No committed credentials.** The admin password comes from `DEFAULT_ADMIN_PASSWORD` or is generated to a `0600` file.
+  Five failed sign-ins lock an account for 15 minutes. `python-jose` was replaced by PyJWT.
+- **SSO.** `POST /auth/sso` verifies an OpenID Connect ID token (asymmetric algorithms only; issuer, audience, expiry and a
+  verified email are required). Configure `MO_OIDC_ISSUER` / `MO_OIDC_AUDIENCE`.
+- **Address pinning.** Every outbound call resolves the host once, validates every address and connects to that IP, so DNS
+  rebinding cannot redirect it. TLS still verifies the original name.
+- **Workflow engine.** All 17 node types execute. API/Webhook calls that change anything need a granted approval; the
+  Database node is a tenant-scoped key-value store; Parallel branches are isolated but run one after another.
+- **Background runs.** `POST /runs/{id}/execute` with `{"background": true}` queues the run on a worker pool. A restart marks
+  in-flight runs FAILED so they can be resumed.
+- **Deployment.** Off by default. `MO_DEPLOY_ADAPTER=export-bundle` writes a checksummed ZIP; `deploy-hook` triggers your host's
+  deploy hook. Both report PARTIAL, never SUCCESS, because MO cannot confirm a launch.
+- **Sandbox.** `MO_SANDBOX_MODE=container` runs builds under `docker run` (no network, all capabilities dropped, read-only
+  root, non-root) and fails closed if no runtime is reachable.
+- **Browser.** `browser.read_page` and the approval-gated `browser.submit_form` drive an isolated Chromium (optional
+  `playwright` package); every sub-request goes through the SSRF guard.
+- **Provider adapters** (Whisper, Deepgram, ElevenLabs, embeddings, LLM-as-judge, market data) fail with
+  `CREDENTIAL_REQUIRED` until configured and are tested against mock transports only.
+- **Vertical engines.** Telecom cell health, capacity breach and root cause; hospitality KPIs and overbooking; deal and
+  renewal risk and revenue leakage; CVSS 3.1 scoring and incident triage; 12 business-in-a-box blueprints.
+
+Still not built (needs hardware, an OS driver, a trained model or an external account): desktop/device control, acoustic
+wake word, speaker verification, object recognition, exchange account connectors. Legacy tables are still not tenant-scoped.
+
 ## Governance you will notice
 
 - **The default run needs approval.** At autonomy level 1 even a LOW-risk step waits (`202 PENDING_APPROVAL`).
@@ -54,19 +84,17 @@ measurement, vulnerability scanning. The manifest lists each with its status.
 
 ## Limitations (also reflected in the manifest)
 
-- Runs are **synchronous**; a handler that times out leaves its worker thread abandoned until it returns.
-- The A2A replay-nonce cache is **per process**; multi-worker deployments need a shared store.
+- A step handler that ignores its timeout keeps its worker thread until it returns (Python cannot kill a thread).
 - A2A inbound needs a tenant token in addition to the HMAC, and reaches only scope-free tools on the peer's allow-list.
-- The egress guard cannot fully close the DNS-rebinding window.
-- No LLM-as-judge evaluation (needs a provider credential). No neural embeddings.
-- Planned or future, not built: computer vision, device/desktop control, deployment adapters, server-side STT/TTS, "quantum-ready".
+- LLM-as-judge and neural embeddings are built but need a provider credential (they fail closed without one).
+- Planned or future, not built: device/desktop control, exchange account connectors, object recognition, "quantum-ready".
 - Wake word is transcript keyword matching, not an acoustic model.
-- Sandbox execution is process-level, not a container.
+- Sandbox execution is process-level unless container mode is enabled and a runtime is present.
 
-## Standing production blockers (unchanged)
+## Remaining production blockers
 
-151 legacy routes outside `/api/mo` are anonymous (some handle PHI); a default admin password is committed;
-10 workflow node types have no executor; `python-jose` still pulls in the `ecdsa` advisory (swap to PyJWT).
+Legacy tables have no tenant column, so authenticated users share the legacy data. Third-party adapters have not been
+exercised against the live services.
 
 ## Running the tests
 

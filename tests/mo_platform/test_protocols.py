@@ -479,3 +479,174 @@ def test_a2a_outbound_credential_and_unknown_peer(db, tenant_a, a2a_peer, monkey
 def test_a2a_agent_card_lists_only_scope_free_local_tools(ctx, local_tools):
     names = {s["name"] for s in a2a.agent_card(ctx)["skills"]}
     assert "t.echo" in names and "t.scoped" not in names and "mcp.x.y.z" not in names
+
+
+# ── address pinning (closes the DNS-rebinding window) ────────────────────────
+
+import http.server
+import ipaddress
+import socket as _socket
+import threading as _threading
+
+import httpx
+
+from app.mo.protocols import netguard
+
+
+class _Echo(http.server.BaseHTTPRequestHandler):
+    hits: list = []
+
+    def do_GET(self):
+        _Echo.hits.append(self.headers.get("Host"))
+        self.send_response(200); self.end_headers(); self.wfile.write(b"internal-secret")
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture
+def local_server():
+    _Echo.hits = []
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+    _threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv.server_port
+    srv.shutdown()
+
+
+def _fake_resolver(monkeypatch, *answers):
+    """getaddrinfo returns the given IPs in order, one answer per call (the last repeats)."""
+    calls = []
+
+    def fake(host, port, *a, **k):
+        calls.append(host)
+        ip = answers[min(len(calls) - 1, len(answers) - 1)]
+        return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", (ip, port))]
+    monkeypatch.setattr(netguard.socket, "getaddrinfo", fake)
+    return calls
+
+
+def test_rebinding_answer_cannot_redirect_a_validated_connection(monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    calls = _fake_resolver(monkeypatch, "8.8.8.8", "127.0.0.1")        # the name "rebinds" to loopback after the first answer
+    seen = []
+    t = netguard.PinnedTransport(httpx.MockTransport(lambda r: (seen.append(r), httpx.Response(200))[1]))
+    # Request 1: ONE lookup, and the connection goes to exactly the address that was validated.
+    assert t.handle_request(httpx.Request("GET", "http://rebind.example/x")).status_code == 200
+    assert calls == ["rebind.example"] and [r.url.host for r in seen] == ["8.8.8.8"]
+    # Request 2: the new (loopback) answer is validated and refused; nothing reaches the network layer.
+    with pytest.raises(netguard.BlockedAddress):
+        t.handle_request(httpx.Request("GET", "http://rebind.example/x"))
+    assert calls == ["rebind.example"] * 2 and len(seen) == 1
+
+
+def test_private_resolution_is_refused_unless_the_escape_hatch_is_set(local_server, monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    _fake_resolver(monkeypatch, "127.0.0.1")
+    with netguard.pinned_client(timeout=1.0) as client:
+        with pytest.raises(netguard.BlockedAddress):
+            client.get(f"http://internal.example:{local_server}/")
+    assert _Echo.hits == []
+    for ip in ("169.254.169.254", "10.0.0.5", "192.168.1.1", "::1", "0.0.0.0"):
+        _fake_resolver(monkeypatch, ip) if ":" not in ip else monkeypatch.setattr(
+            netguard.socket, "getaddrinfo", lambda h, p, *a, _ip=ip, **k: [(_socket.AF_INET6, _socket.SOCK_STREAM, 6, "", (_ip, p, 0, 0))])
+        with pytest.raises(netguard.BlockedAddress):
+            netguard.PinnedTransport(httpx.MockTransport(lambda r: httpx.Response(200)))._resolve("x.example", 80)
+
+
+def test_a_name_with_any_private_answer_is_refused(monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(netguard.socket, "getaddrinfo", lambda h, p, *a, **k: [
+        (_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("8.8.8.8", p)), (_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("10.0.0.1", p))])
+    with pytest.raises(netguard.BlockedAddress):
+        netguard.PinnedTransport(httpx.MockTransport(lambda r: httpx.Response(200)))._resolve("mixed.example", 80)
+
+
+def test_pinned_request_keeps_the_original_host_header_and_sni(monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    _fake_resolver(monkeypatch, "8.8.8.8")
+    seen = []
+    inner = httpx.MockTransport(lambda r: (seen.append(r), httpx.Response(200))[1])
+    t = netguard.PinnedTransport(inner)
+    resp = t.handle_request(httpx.Request("POST", "https://api.example.com:8443/v1/x?y=1", json={"a": 1}))
+    assert resp.status_code == 200
+    r = seen[0]
+    assert r.url.host == "8.8.8.8" and r.url.port == 8443 and r.url.path == "/v1/x" and r.url.query == b"y=1"
+    assert r.headers["Host"] == "api.example.com:8443" and r.extensions["sni_hostname"] == "api.example.com"
+    assert json.loads(r.content) == {"a": 1}
+
+
+def test_ip_literals_are_validated_too(monkeypatch):
+    monkeypatch.delenv("MO_PROTOCOL_ALLOW_PRIVATE", raising=False)
+    t = netguard.PinnedTransport(httpx.MockTransport(lambda r: httpx.Response(200)))
+    with pytest.raises(netguard.BlockedAddress):
+        t.handle_request(httpx.Request("GET", "http://169.254.169.254/latest/meta-data"))
+    assert t.handle_request(httpx.Request("GET", "http://8.8.8.8/")).status_code == 200
+
+
+def test_pinned_client_works_end_to_end_against_a_real_server_when_private_is_allowed(local_server, monkeypatch):
+    monkeypatch.setenv("MO_PROTOCOL_ALLOW_PRIVATE", "1")
+    _fake_resolver(monkeypatch, "127.0.0.1")
+    with netguard.pinned_client(timeout=3.0) as client:
+        resp = client.get(f"http://friendly.example:{local_server}/")
+    assert resp.status_code == 200 and resp.text == "internal-secret" and _Echo.hits == [f"friendly.example:{local_server}"]
+
+
+def test_redirects_are_not_followed(local_server, monkeypatch):
+    monkeypatch.setenv("MO_PROTOCOL_ALLOW_PRIVATE", "1")
+    with netguard.pinned_client(timeout=3.0, transport=httpx.MockTransport(
+            lambda r: httpx.Response(302, headers={"Location": "http://169.254.169.254/"}))) as client:
+        assert client.get("http://127.0.0.1/").status_code == 302
+
+
+def _tls_server(tmp_path, san):
+    import datetime
+    import ssl
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, san)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(days=1))
+            .not_valid_after(now + datetime.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(san)]), critical=False).sign(key, hashes.SHA256()))
+    crt, k = tmp_path / f"{san}.crt", tmp_path / f"{san}.key"
+    crt.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    k.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                                    serialization.NoEncryption()))
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(crt), str(k))
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    _threading.Thread(target=srv.serve_forever, daemon=True).start()
+    client_ctx = ssl.create_default_context(cafile=str(crt))
+    return srv, client_ctx
+
+
+def test_tls_is_verified_against_the_original_hostname_not_the_pinned_ip(tmp_path, monkeypatch):
+    monkeypatch.setenv("MO_PROTOCOL_ALLOW_PRIVATE", "1")
+    _fake_resolver(monkeypatch, "127.0.0.1")
+    _Echo.hits = []
+    srv, cctx = _tls_server(tmp_path, "friendly.example")
+    try:
+        with netguard.pinned_client(timeout=5.0, transport=netguard.PinnedTransport(httpx.HTTPTransport(verify=cctx))) as c:
+            ok = c.get(f"https://friendly.example:{srv.server_port}/")
+        assert ok.status_code == 200 and _Echo.hits == [f"friendly.example:{srv.server_port}"]
+    finally:
+        srv.shutdown()
+
+
+def test_a_certificate_for_a_different_name_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("MO_PROTOCOL_ALLOW_PRIVATE", "1")
+    _fake_resolver(monkeypatch, "127.0.0.1")
+    _Echo.hits = []
+    srv, cctx = _tls_server(tmp_path, "someone-else.example")            # an attacker's server, valid cert, wrong name
+    try:
+        with netguard.pinned_client(timeout=5.0, transport=netguard.PinnedTransport(httpx.HTTPTransport(verify=cctx))) as c:
+            with pytest.raises(httpx.ConnectError):
+                c.get(f"https://friendly.example:{srv.server_port}/")
+        assert _Echo.hits == []
+    finally:
+        srv.shutdown()

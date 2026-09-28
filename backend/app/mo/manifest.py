@@ -88,6 +88,13 @@ CAPABILITIES: list[dict[str, Any]] = [
        "tests/mo_platform/test_evaluation.py",
        "Built. A judged case FAILS (never skips) until a model provider is configured. Judged text is injection-screened "
        "and fenced. Tested with a stub grader."),
+    _f("intelligence", "Vertical engines: telecom (cell health, capacity breach, root cause), hospitality (KPIs, overbooking), "
+       "revenue intelligence (deal/renewal risk, leakage), cyber (CVSS 3.1, incident triage)", "implemented",
+       "app.mo.intelligence.verticals", "tests/mo_platform/test_verticals.py",
+       "Closed-form or transparent rule-based; none read live systems or take action."),
+    _f("intelligence", "Business-in-a-box: 12 vertical blueprints that drive the Universal Builder", "implemented",
+       "app.mo.intelligence.business_box", "tests/mo_platform/test_verticals.py",
+       "Generates a Builder prompt; deploys nothing. Compliance notes are prompts for professional review, not legal advice."),
     # ── MO authority (permission-first execution) ──
     _f("authority", "Capability gateway: args-bound single-use grants, deny-list, finance guardrails, receipts, idempotency",
        "implemented", "app.mo.authority.gateway", "tests/mo_platform/test_authority.py",
@@ -100,8 +107,9 @@ CAPABILITIES: list[dict[str, Any]] = [
        "app.mo.lifecycle.agents", "tests/mo_platform/test_authority.py",
        "A registry and enforcement point, not a dynamic worker factory: no agent runtime is spawned."),
     _f("authority", "Validation council (facts, code, security, quality, receipt) with risk-based mandatory sets",
-       "partial", "app.mo.council.validators", "tests/mo_platform/test_lifecycle.py",
-       "Code validation is a syntax check only; running tests needs a real sandbox provider."),
+       "implemented", "app.mo.council.validators", "tests/mo_platform/test_lifecycle.py",
+       "Supplied tests run under pytest in the build sandbox (process-level isolation unless MO_SANDBOX_MODE=container). "
+       "Facts checking is lexical, not an entailment model."),
     _f("authority", "Release pipeline: scan, eval, approval, canary check, promote, rollback", "partial",
        "app.mo.lifecycle.releases", "tests/mo_platform/test_lifecycle.py",
        "Moves a registry pointer; it deploys nothing and does not measure canary traffic. Candidates cannot "
@@ -115,23 +123,29 @@ CAPABILITIES: list[dict[str, Any]] = [
     _f("authority", "Desktop action contract and gated tool", "partial", "app.mo.authority.desktop",
        "tests/mo_platform/test_lifecycle.py",
        "Contract and approval gate only. No OS driver exists, so real actions answer PROVIDER_UNAVAILABLE."),
-    _f("authority", "Exchange / broker connectors", "planned", None,
-       note="Not built. Would need exchange credentials and a security review."),
+    _f("authority", "Public market data (read-only ticker)", "implemented", "app.mo.connectors.market_data",
+       "tests/mo_platform/test_perception_and_market.py",
+       "Public Kraken ticker only, mock-tested. Account connectors (balances, orders) are NOT built and no withdrawal capability exists."),
+    _f("authority", "Exchange / broker account connectors", "planned", None,
+       note="Not built. They would need exchange credentials, a security review and the strong-confirmation flow."),
     _f("authority", "OpenID Connect SSO", "credential_required", "app.mo.security.oidc",
        "tests/security/test_sso_and_lockout.py",
        "Built (asymmetric algorithms only, iss/aud/exp/verified-email enforced). Needs MO_OIDC_ISSUER and MO_OIDC_AUDIENCE. "
        "Tested with locally generated keys, not a live identity provider."),
-    _f("authority", "Container / micro-VM sandbox provider and browser adapter", "planned", None,
-       note="Not built yet."),
+    _f("authority", "Browser adapter (isolated Chromium; read-only page reads, approval-gated form submission)", "implemented",
+       "app.mo.browser.adapter", "tests/mo_platform/test_browser.py",
+       "Needs the optional playwright package and a Chromium build. Every sub-request passes the SSRF guard; page content is "
+       "untrusted. Live browser tests skip where Chromium is absent (e.g. CI)."),
     _f("governance", "Authentication gate on all original EZ-NEXUS routes; patient routes admin-only and audited",
        "implemented", "app.legacy_gate", "tests/security/test_legacy_gate.py",
        "Legacy tables have no tenant column, so authenticated users share legacy data."),
     _f("governance", "No committed admin password; password lockout after repeated failures", "implemented", "app.auth",
        "tests/security/test_legacy_gate.py"),
     # ── orchestration & protocols ──
-    _f("orchestration", "Multi-step orchestrator (DAG, retries, approvals, budgets, resume)", "partial",
-       "app.mo.orchestration.runner", "tests/mo_platform/test_orchestration.py",
-       "Executes synchronously in the request; a timed-out handler thread is abandoned, not killed."),
+    _f("orchestration", "Multi-step orchestrator (DAG, retries, approvals, budgets, resume, background execution)", "implemented",
+       "app.mo.orchestration.runner", "tests/integration/test_background_runs.py",
+       "Background runs use an in-process worker pool (a restart marks in-flight runs FAILED so they can be resumed). A step "
+       "handler that ignores its timeout keeps its thread until it returns."),
     _f("orchestration", "Event fabric", "implemented", "app.mo.events.fabric", "tests"),
     _f("protocols", "MCP client (remote tools become governed local tools)", "implemented",
        "app.mo.protocols.mcp_client", "tests/mo_platform/test_protocols.py",
@@ -142,8 +156,10 @@ CAPABILITIES: list[dict[str, Any]] = [
        "tests/mo_platform/test_protocols.py",
        "Replay nonces live in the database so every worker sees them. Inbound tasks also need a tenant token and reach "
        "only scope-free tools on a peer's allow-list."),
-    _f("protocols", "Egress guard (SSRF / private-range blocking)", "partial", "app.mo.protocols.netguard",
-       "tests/mo_platform/test_protocols.py", "Cannot fully close the DNS-rebinding window."),
+    _f("protocols", "Egress guard: SSRF checks plus resolve-once address pinning (closes the DNS-rebinding window)", "implemented",
+       "app.mo.protocols.netguard", "tests/mo_platform/test_protocols.py",
+       "Every outbound call resolves the host once, validates every address, and connects to that IP with the original Host "
+       "and TLS name (verified in tests against a real TLS server). Redirects are not followed."),
     # ── build & voice ──
     _f("builder", "Universal builder runtime and reference build", "implemented", "app.mo.builder",
        "tests/integration/test_builder_api.py"),
@@ -151,9 +167,14 @@ CAPABILITIES: list[dict[str, Any]] = [
        "Parallel, Subworkflow, Human Task, ...)", "implemented", "app.mo.builder.workflow_nodes",
        "tests/builder/test_workflow_nodes.py",
        "Parallel branches are isolated but run one after another. API/Webhook side effects need a granted approval."),
-    _f("builder", "Sandbox execution", "partial", "app.mo.builder",
-       note="Process-level isolation, not a container."),
-    _f("builder", "Deployment adapters", "planned", None, note="No deploy adapter exists; deploys are not faked."),
+    _f("builder", "Sandbox execution (process-level by default; container mode with MO_SANDBOX_MODE=container)", "partial",
+       "app.mo.sandbox.runner", "tests/builder/test_container_sandbox.py",
+       "Container mode (no network, cap-drop, read-only root, non-root, resource limits) is unit-tested against a fake docker; "
+       "no container daemon was available to run it live here. It fails closed and never falls back to process isolation."),
+    _f("builder", "Deployment adapters (export-bundle, deploy-hook)", "partial", "app.mo.builder.deploy",
+       "tests/builder/test_approvals_and_deploy.py",
+       "Off unless MO_DEPLOY_ADAPTER is set. Both adapters report PARTIAL, never SUCCESS: the bundle is not launched and a hook "
+       "trigger is not confirmed. No cloud-provider management API adapter exists."),
     _f("voice", "Conversational voice assistant (wake phrase, follow-ups, governed commands)", "partial",
        "app.mo.voice.engine", "tests",
        "Recognition and synthesis run in the browser; the wake word is a transcript keyword, not acoustic."),
@@ -165,7 +186,10 @@ CAPABILITIES: list[dict[str, Any]] = [
     _f("observability", "Prometheus metrics and per-tenant tracing", "implemented",
        "app.mo.observability.metrics", "tests/mo_platform"),
     # ── not built ──
-    _f("perception", "Computer vision", "planned", None, note="No vision pipeline exists."),
+    _f("perception", "Image analysis: measurements, dominant colours, blur/blank detection, OCR when Tesseract is installed",
+       "partial", "app.mo.perception", "tests/mo_platform/test_perception_and_market.py",
+       "Classical image statistics only. No object, face or scene recognition; the blur flag is an uncalibrated rule of thumb; "
+       "OCR needs the tesseract binary (absent in the dev environment, so its live path is tested with a stub)."),
     _f("perception", "Device / desktop control", "planned", None, note="No device-control layer exists."),
     _f("research", "Quantum-ready architecture", "future", None,
        note="A direction only; nothing in this codebase uses quantum computing."),
@@ -173,7 +197,8 @@ CAPABILITIES: list[dict[str, Any]] = [
 
 KNOWN_BLOCKERS = [
     "Legacy tables have no tenant column: authenticated users share the legacy data. Patient routes are admin-only and audited; true tenant isolation needs a schema migration.",
-    "Orchestrator runs are synchronous; there is no background worker.",
+    "Third-party adapters (Whisper, Deepgram, ElevenLabs, embeddings, OIDC, deploy hooks, market data) are tested against mock transports, not the live services; each needs the operator's own account and credential.",
+    "Not built because they need hardware, an OS driver, a trained model or an external account: desktop/device control, acoustic wake word, speaker verification, object recognition, exchange account connectors.",
 ]
 
 

@@ -238,8 +238,9 @@ class _HttpVoiceAdapter(VoiceAdapter):
     def _call(self, method: str, url: str, **kw: Any):
         """Returns (response, None) or (None, MoResult)."""
         import httpx
+        from ..protocols.netguard import pinned_client
         try:
-            with httpx.Client(timeout=self.timeout, transport=self.transport, follow_redirects=False) as http:
+            with pinned_client(timeout=self.timeout, transport=self.transport) as http:
                 resp = http.request(method, url, **kw)
         except httpx.TimeoutException:
             return None, MoResult(ResultState.TIMEOUT, f"{self._name} did not answer within {self.timeout:.0f}s.")

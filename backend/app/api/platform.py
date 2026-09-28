@@ -28,6 +28,7 @@ from ..mo.knowledge.service import KnowledgeService
 from ..mo.memory.store import MemoryStore
 from ..mo.observability.metrics import metrics
 from ..mo.observability.tracing import tracer
+from ..mo.orchestration import background
 from ..mo.orchestration.runner import Orchestrator
 from ..mo.protocols import a2a, mcp_server
 from ..mo.protocols.peers import PeerRegistry
@@ -133,6 +134,7 @@ class EraseIn(BaseModel):
 class ExecuteIn(BaseModel):
     parallelism: int = Field(default=1, ge=1, le=8)
     retry_failed: bool = False
+    background: bool = False
 
 
 class PolicyIn(BaseModel):
@@ -311,6 +313,14 @@ def get_run(run_id: str, ctx: RequestContext = Depends(resolve_context), db: Ses
 def execute_run(run_id: str, body: ExecuteIn = ExecuteIn(), ctx: RequestContext = Depends(resolve_context),
                 db: Session = Depends(get_db)):
     _write(ctx)
+    if body.background:
+        from sqlalchemy.orm import sessionmaker
+        res = background.submit(db, sessionmaker(bind=db.get_bind()), ctx, run_id, parallelism=body.parallelism,
+                                retry_failed=body.retry_failed)
+        if not res.state.is_success:
+            return _respond(res)
+        return JSONResponse(status_code=202, content={"state": "QUEUED", "detail": "The run was queued; poll GET /runs/{id}.",
+                                                      "data": res.data, "meta": {}})
     return _respond(Orchestrator(db, ctx, commit=True).execute(
         run_id, parallelism=body.parallelism, retry_failed=body.retry_failed))
 

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..mo.approvals import engine as approvals
+from ..mo.builder import deploy as deploy_adapters
 from ..mo.audit import chain
 from ..mo.builder import export as export_mod
 from ..mo.builder import workflows as workflow_mod
@@ -544,11 +545,7 @@ def builder_status(
              "requires_approval": t.requires_approval}
             for t in tools
         ],
-        "deployment": {
-            "adapters_implemented": [],
-            "note": "No deployment provider adapter is implemented. Deploy requests are "
-                    "approval-gated and then report CREDENTIAL_REQUIRED.",
-        },
+        "deployment": deploy_adapters.adapter_status(),
         "project_count": db.query(BuilderProject).filter(
             BuilderProject.tenant_id == ctx.tenant_id).count(),
     }
