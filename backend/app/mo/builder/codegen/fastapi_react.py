@@ -511,7 +511,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
@@ -708,7 +709,7 @@ def _requirements_file() -> GeneratedFile:
         "uvicorn[standard]>=0.30.1",
         "sqlalchemy>=2.0.30",
         "pydantic>=2.10.0",
-        "python-jose[cryptography]>=3.3.0",
+        "PyJWT>=2.8.0",
         "python-multipart>=0.0.9",
         "psycopg2-binary>=2.9.9",
         "",

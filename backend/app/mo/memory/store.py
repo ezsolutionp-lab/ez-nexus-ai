@@ -54,7 +54,7 @@ MAX_CONTENT_CHARS = 4000
 class MemoryStore:
     def __init__(self, db: Session, ctx: RequestContext):
         self.db, self.ctx = db, ctx
-        self.embedder = ranking.get_embedder()
+        self.embedder = ranking.local_embedder()
 
     def _visible(self):
         """Own records, plus shared records from the same tenant. Expired records are excluded."""

@@ -13,8 +13,8 @@ task through the ToolRegistry under a restricted identity.
            tools report APPROVAL_REQUIRED. A peer can never widen its own reach.
   Outbound the reply must itself be signed; an unsigned or mis-signed reply is FAILED.
 
-Limits (also in docs/PLATFORM.md): the replay-nonce cache is per process, so a multi-worker
-deployment needs a shared store for full replay protection.
+Replay nonces live in the database (mo_a2a_nonces), so every worker sharing the database rejects a
+replayed message; the store is bounded per tenant and old rows are purged.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ import hmac
 import json
 import os
 import secrets
-import threading
 import time
 from typing import Any, Optional
 
@@ -55,26 +54,23 @@ def verify(secret: str, body: dict[str, Any], signature: str) -> bool:
     return isinstance(signature, str) and hmac.compare_digest(sign(secret, body), signature)
 
 
-class _NonceCache:
-    def __init__(self) -> None:
-        self._seen: dict[tuple[str, str, str], float] = {}
-        self._lock = threading.Lock()
+def claim_nonce(db: Session, tenant_id: str, peer: str, nonce: str, now: float) -> bool:
+    """Record a nonce in the database so every worker sees it. False means it was already used (a replay)."""
+    from datetime import datetime, timedelta
 
-    def claim(self, key: tuple[str, str, str], now: float) -> bool:
-        with self._lock:
-            for k in [k for k, t in self._seen.items() if now - t > REPLAY_WINDOW_SECONDS * 2]:
-                del self._seen[k]
-            if key in self._seen or len(self._seen) >= MAX_NONCES:
-                return False
-            self._seen[key] = now
-            return True
+    from sqlalchemy.exc import IntegrityError
 
-    def clear(self) -> None:
-        with self._lock:
-            self._seen.clear()
-
-
-nonces = _NonceCache()
+    from ..db import A2ANonce
+    seen = datetime.utcfromtimestamp(now)
+    db.query(A2ANonce).filter(A2ANonce.seen_at < seen - timedelta(seconds=REPLAY_WINDOW_SECONDS * 2)).delete()
+    if db.query(A2ANonce).filter(A2ANonce.tenant_id == tenant_id).count() >= MAX_NONCES:
+        return False
+    try:
+        with db.begin_nested():
+            db.add(A2ANonce(tenant_id=tenant_id, peer=peer, nonce=nonce, seen_at=seen))
+        return True
+    except IntegrityError:
+        return False
 
 
 def agent_card(ctx: RequestContext, registry: Optional[ToolRegistry] = None) -> dict[str, Any]:
@@ -127,7 +123,7 @@ def receive_task(db: Session, ctx: RequestContext, envelope: Any, *, now: Option
         return refuse(ResultState.FAILED, "Timestamp is not an integer.", peer_name)
     if age > REPLAY_WINDOW_SECONDS:
         return refuse(ResultState.POLICY_DENIED, f"Message is outside the {REPLAY_WINDOW_SECONDS}s replay window.", peer_name)
-    if not nonces.claim((ctx.tenant_id, peer_name, str(envelope["nonce"])), now):
+    if not claim_nonce(db, ctx.tenant_id, peer_name, str(envelope["nonce"])[:128], now):
         return refuse(ResultState.POLICY_DENIED, "Replayed nonce.", peer_name)
 
     task = envelope["task"]

@@ -31,6 +31,8 @@ class ModelRequest:
     data_classification: str = "INTERNAL"
     max_cost_usd: float = 0.50
     timeout_seconds: int = 60
+    tenant_id: Optional[str] = None      # required for caching: a cache entry is never shared across tenants
+    use_cache: bool = False              # opt in; only low-temperature, non-RESTRICTED requests are cached
 
 
 @dataclass
@@ -214,6 +216,8 @@ class Budget:
 class ModelRouter:
     """Selects a provider by capability, data classification, health and budget."""
 
+    _cache = None
+
     def __init__(self, adapters: Optional[list[ModelAdapter]] = None):
         self._adapters: list[ModelAdapter] = adapters if adapters is not None else [
             AnthropicAdapter(), OpenAIAdapter()
@@ -266,16 +270,52 @@ class ModelRouter:
             out.append(a)
         return out
 
+    def _cache_key(self, request: ModelRequest) -> Optional[tuple[str, str]]:
+        if not (request.use_cache and request.tenant_id) or request.temperature > 0.3 \
+                or request.data_classification == "RESTRICTED":
+            return None
+        import hashlib
+        return request.tenant_id, f"{request.capability}:{hashlib.sha256(request.system.encode()).hexdigest()[:12]}"
+
     def complete(self, request: ModelRequest, budget: Optional[Budget] = None) -> MoResult:
-        """Run a completion and record it in the metrics registry."""
+        """Run a completion (serving a near-identical earlier answer from the tenant's cache when opted in)."""
         import time as _time
 
+        from ..observability.metrics import metrics
         from ..observability.tracing import record_model_call
+        from .context import SemanticCache
+
+        key = self._cache_key(request)
+        if key is not None:
+            if getattr(self, "_cache", None) is None:
+                self._cache = SemanticCache()
+            hit = self._cache.get(key[0], request.prompt, namespace=key[1])
+            if hit is not None:
+                metrics.inc("mo_model_cache_total", result="hit")
+                return MoResult.ok({"text": hit["answer"]}, provider="semantic-cache", model="cache", cache_hit=True,
+                                   similarity=hit["similarity"], cost_usd=0.0, input_tokens=0, output_tokens=0, latency_ms=0)
+            metrics.inc("mo_model_cache_total", result="miss")
 
         started = _time.perf_counter()
         result = self._complete(request, budget)
         record_model_call(result, (_time.perf_counter() - started) * 1000)
+        if key is not None and result.state.is_success and isinstance(result.data, dict):
+            self._cache.put(key[0], request.prompt, result.data.get("text", ""), namespace=key[1])
         return result
+
+    def complete_conversation(self, messages: list[dict[str, str]], request: ModelRequest, policy=None,
+                              budget: Optional[Budget] = None) -> MoResult:
+        """Fit a long conversation into the context policy (extractive summary of old turns), then complete it."""
+        from .context import compress
+
+        packed = compress(messages, policy)
+        system = "\n".join([request.system] + [m["content"] for m in packed["messages"] if m["role"] == "system"]).strip()
+        transcript = "\n".join(f"{m['role']}: {m['content']}" for m in packed["messages"] if m["role"] != "system")
+        from dataclasses import replace
+        res = self.complete(replace(request, prompt=transcript, system=system), budget)
+        res.meta.update(context_compressed=packed["compressed"], context_tokens_before=packed["tokens_before"],
+                        context_tokens_after=packed["tokens_after"])
+        return res
 
     def _complete(self, request: ModelRequest, budget: Optional[Budget] = None) -> MoResult:
         """Run a completion. Returns a truthful MoResult, never a fabricated body."""

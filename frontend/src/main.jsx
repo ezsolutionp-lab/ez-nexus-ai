@@ -15,6 +15,28 @@ import { LangProvider, useLang, LANG_LIST } from './i18n.jsx'
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const WS  = API.replace(/^http/, 'ws')
 
+// ── Auth on every API call ───────────────────────────────────────────────────
+// The backend now refuses anonymous requests. Attach the stored token to every request aimed at the API
+// (unless the caller set its own), and tell the app when the server says the session is gone.
+if (typeof window !== 'undefined' && !window.__ezFetchPatched) {
+  window.__ezFetchPatched = true
+  const nativeFetch = window.fetch.bind(window)
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || ''
+    const toApi = url.startsWith(API)
+    let next = init
+    if (toApi) {
+      const token = localStorage.getItem('ez_token')
+      const headers = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {})
+      if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+      next = { ...init, headers }
+    }
+    const res = await nativeFetch(input, next)
+    if (toApi && res.status === 401 && !url.includes('/auth/login')) window.dispatchEvent(new Event('ez-unauthorized'))
+    return res
+  }
+}
+
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -40,7 +62,7 @@ function useWebSocket(onMessage) {
   const clientId = useRef(`dashboard-${Math.random().toString(36).slice(2)}`)
 
   const connect = useCallback(() => {
-    const ws = new WebSocket(`${WS}/ws/${clientId.current}`)
+    const ws = new WebSocket(`${WS}/ws/${clientId.current}?token=${encodeURIComponent(localStorage.getItem('ez_token') || '')}`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -2809,7 +2831,6 @@ function AuthModal({ onClose }) {
             <button className="btn btn-primary auth-submit" type="submit" disabled={loading}>
               {loading ? 'Signing in…' : 'Sign In'}
             </button>
-            <p className="auth-hint">Default admin: ez.nexusai@gmail.com / Commander@2024!</p>
           </form>
         ) : (
           <form onSubmit={handleRegister} className="auth-form">
@@ -6596,6 +6617,11 @@ function AppInner() {
   const [activeTab, setActiveTab]         = useState('home')
   const [notifications, setNotifications] = useState([])
   const [showAuth,  setShowAuth]          = useState(false)
+  useEffect(() => {
+    const open = () => setShowAuth(true)
+    window.addEventListener('ez-unauthorized', open)
+    return () => window.removeEventListener('ez-unauthorized', open)
+  }, [])
   const [showChgPw, setShowChgPw]         = useState(false)
   const [userMenuOpen, setUserMenuOpen]   = useState(false)
   const userMenuRef = useRef(null)

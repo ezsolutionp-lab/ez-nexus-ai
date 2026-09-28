@@ -111,7 +111,6 @@ def env(monkeypatch):
     monkeypatch.setenv("MO_PROTOCOL_ALLOW_PRIVATE", "1")
     monkeypatch.setenv("PEER_MCP_TOKEN", TOKEN)
     monkeypatch.setenv("PEER_A2A_SECRET", Remote.a2a_secret)
-    a2a.nonces.clear()
 
 
 def admin(t, actor="admin-1"):

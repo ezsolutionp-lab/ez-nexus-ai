@@ -113,3 +113,69 @@ def test_cache_validation():
             SemanticCache(**kw)
     with pytest.raises(ValueError):
         SemanticCache().put("", "q", "a")
+
+
+# ── wired into ModelRouter ───────────────────────────────────────────────────
+
+from app.mo.errors import MoResult, ResultState
+from app.mo.modelfabric.router import ModelAdapter, ModelRequest, ModelResponse, ModelRouter
+
+
+class CountingAdapter(ModelAdapter):
+    name = "counting"
+    credential_env_var = None
+    allows_restricted_data = True
+    supported_capabilities = frozenset({"general", "reasoning"})
+
+    def __init__(self, text="the refund window is 30 days"):
+        self.calls, self.text = 0, text
+
+    def is_configured(self):
+        return True
+
+    def complete(self, request):
+        self.calls += 1
+        return ModelResponse(self.text, self.name, "m", 10, 5, 0.001, 3)
+
+
+def _req(prompt="What is the refund window for orders?", **kw):
+    return ModelRequest(prompt=prompt, tenant_id=kw.pop("tenant_id", "t1"), use_cache=kw.pop("use_cache", True), **kw)
+
+
+def test_router_serves_a_repeat_question_from_the_tenant_cache():
+    a = CountingAdapter()
+    r = ModelRouter([a])
+    first = r.complete(_req())
+    again = r.complete(_req("what is the refund window for orders"))
+    assert first.state.is_success and again.state.is_success and a.calls == 1
+    assert again.meta["cache_hit"] is True and again.meta["cost_usd"] == 0.0 and again.data["text"] == first.data["text"]
+
+
+def test_router_cache_is_opt_in_tenant_scoped_and_skips_restricted_or_creative_calls():
+    a = CountingAdapter()
+    r = ModelRouter([a])
+    r.complete(_req(use_cache=False)); r.complete(_req(use_cache=False))
+    assert a.calls == 2
+    r.complete(_req()); r.complete(_req(tenant_id="t2"))
+    assert a.calls == 4                                         # t2 does not see t1's answer
+    r.complete(_req(data_classification="RESTRICTED")); r.complete(_req(data_classification="RESTRICTED"))
+    r.complete(_req(temperature=0.9)); r.complete(_req(temperature=0.9))
+    assert a.calls == 8
+
+
+def test_router_never_caches_failures_or_pii():
+    a = CountingAdapter(text="call me on 4111 1111 1111 1111")
+    r = ModelRouter([a])
+    r.complete(_req()); r.complete(_req())
+    assert a.calls == 2                                         # the answer held a card number: not stored
+    empty = ModelRouter([])
+    assert empty.complete(_req()).state != ResultState.SUCCESS
+
+
+def test_complete_conversation_compresses_before_calling_the_model():
+    a = CountingAdapter()
+    r = ModelRouter([a])
+    msgs = _convo(60)
+    res = r.complete_conversation(msgs, ModelRequest(prompt=""), POLICY)
+    assert res.state.is_success and res.meta["context_compressed"] is True
+    assert res.meta["context_tokens_after"] < res.meta["context_tokens_before"] / 4

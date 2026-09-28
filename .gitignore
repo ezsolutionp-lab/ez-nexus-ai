@@ -34,3 +34,4 @@ logs/
 mo_workspaces/
 generated_videos/
 *.db
+.initial_admin_password

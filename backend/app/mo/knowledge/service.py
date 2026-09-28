@@ -117,11 +117,16 @@ class KnowledgeService:
                             meta={"doc_id": existing.id, "duplicate": True})
 
         pieces = chunk_text(clean)
+        emb = self._embedder_for(classification)
+        try:
+            vectors = self._embed_all(emb, pieces)
+        except ranking.EmbeddingError as exc:
+            return MoResult(ResultState.PROVIDER_UNAVAILABLE, f"Nothing was indexed: {exc}.")
         doc = KnowledgeDoc(
             tenant_id=self.ctx.tenant_id, created_by=self.ctx.actor_id, title=title[:300],
             source=(source or "")[:500] or None, classification=classification,
             allowed_scopes_json=json.dumps(sorted(set(allowed_scopes or []))),
-            content_hash=digest, chunk_count=len(pieces), embedder=self.embedder.name,
+            content_hash=digest, chunk_count=len(pieces), embedder=emb.name,
         )
         self.db.add(doc)
         self.db.flush()
@@ -129,14 +134,14 @@ class KnowledgeService:
             self.db.add(KnowledgeChunk(
                 tenant_id=self.ctx.tenant_id, created_by=self.ctx.actor_id, doc_id=doc.id, seq=seq,
                 text=piece, terms_json=json.dumps(ranking.terms(piece)),
-                vector_json=json.dumps({str(k): round(v, 5) for k, v in self.embedder.embed(piece).items()}),
+                vector_json=json.dumps({str(k): round(v, 5) for k, v in vectors[seq].items()}),
                 entities_json=json.dumps(sorted(ranking.entities(piece))),
             ))
         chain.record(self.db, self.ctx, action="knowledge.ingest", result_state=ResultState.SUCCESS,
                      resource_type="knowledge_doc", resource_id=doc.id,
                      detail=f"{len(pieces)} chunks", payload={"title": title, "classification": classification})
         self.db.flush()
-        return MoResult.ok({"doc_id": doc.id, "chunks": len(pieces), "embedder": self.embedder.name,
+        return MoResult.ok({"doc_id": doc.id, "chunks": len(pieces), "embedder": emb.name,
                             "redactions": [f.kind for f in gate.findings]})
 
     def delete(self, doc_id: str) -> MoResult:
@@ -157,6 +162,45 @@ class KnowledgeService:
                  "chunks": d.chunk_count, "embedder": d.embedder}
                 for d in docs if can_read(self.ctx, d)]
 
+    # ── embedding ───────────────────────────────────────────────────────────
+
+    def _embedder_for(self, classification: str) -> "ranking.Embedder":
+        """RESTRICTED text is never sent to an external embedding provider."""
+        return ranking.local_embedder() if classification == "RESTRICTED" else self.embedder
+
+    @staticmethod
+    def _embed_all(emb: "ranking.Embedder", pieces: list[str]) -> list[dict[int, float]]:
+        many = getattr(emb, "embed_many", None)
+        return many(pieces) if many else [emb.embed(p) for p in pieces]
+
+    def _embedder_named(self, name: str):
+        for e in (ranking.local_embedder(), self.embedder):
+            if e.name == name:
+                return e
+        return None
+
+    def reindex(self) -> MoResult:
+        """Re-embed every non-RESTRICTED document with the currently configured embedder."""
+        target, done, skipped = self.embedder, 0, 0
+        docs = self.db.query(KnowledgeDoc).filter(KnowledgeDoc.tenant_id == self.ctx.tenant_id).all()
+        for doc in docs:
+            if doc.embedder == target.name or doc.classification == "RESTRICTED":
+                skipped += 1
+                continue
+            chunks = (self.db.query(KnowledgeChunk).filter(KnowledgeChunk.doc_id == doc.id)
+                      .order_by(KnowledgeChunk.seq).all())
+            try:
+                vectors = self._embed_all(target, [c.text for c in chunks])
+            except ranking.EmbeddingError as exc:
+                return MoResult(ResultState.PROVIDER_UNAVAILABLE, f"Reindex stopped after {done} document(s): {exc}.",
+                                meta={"reindexed": done})
+            for c, v in zip(chunks, vectors):
+                c.vector_json = json.dumps({str(k): round(x, 5) for k, x in v.items()})
+            doc.embedder = target.name
+            done += 1
+        self.db.flush()
+        return MoResult.ok({"reindexed": done, "unchanged": skipped, "embedder": target.name})
+
     # ── retrieval ───────────────────────────────────────────────────────────
 
     def _candidates(self) -> list[tuple[KnowledgeChunk, KnowledgeDoc]]:
@@ -174,9 +218,17 @@ class KnowledgeService:
         qterms = ranking.terms(query)
         docs_terms = [json.loads(c.terms_json) for c, _ in cands]
         sparse = ranking.bm25_scores(qterms, docs_terms)
-        qvec = self.embedder.embed(query)
-        dense = [ranking.cosine(qvec, {int(k): v for k, v in json.loads(c.vector_json).items()})
-                 for c, _ in cands]
+        qvecs: dict[str, Optional[dict[int, float]]] = {}
+        dense = []
+        for c, d in cands:
+            if d.embedder not in qvecs:                      # query is embedded by the same model as each document
+                model = self._embedder_named(d.embedder)
+                try:
+                    qvecs[d.embedder] = model.embed(query) if model else None
+                except ranking.EmbeddingError:
+                    qvecs[d.embedder] = None                 # BM25 and the graph still rank; dense contributes nothing
+            qv = qvecs[d.embedder]
+            dense.append(ranking.cosine(qv, {int(k): v for k, v in json.loads(c.vector_json).items()}) if qv else 0.0)
         graph = ranking.graph_scores(ranking.entities(query), [set(json.loads(c.entities_json)) for c, _ in cands])
         fused = ranking.reciprocal_rank_fusion(
             [ranking.rank_of(sparse), ranking.rank_of(dense), ranking.rank_of(graph)])

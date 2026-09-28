@@ -174,3 +174,114 @@ def test_hallucinated_model_answer_is_withheld(db, ctx, monkeypatch):
     out = s.answer("How long do refunds take to be issued after purchase?")
     assert out.state is ResultState.BLOCKED
     assert out.meta["grounded_ratio"] < 0.6
+
+
+# ── neural embedding provider ───────────────────────────────────────────────
+
+import httpx
+
+from app.mo.knowledge import ranking
+from app.mo.knowledge.service import KnowledgeService as _KS
+
+
+def _fake_provider(calls, status=200):
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        body = __import__("json").loads(request.content)
+        if status != 200:
+            return httpx.Response(status, json={"error": "x"})
+        rows = []
+        for i, text in enumerate(body["input"]):
+            vec = [0.0] * 16
+            for w in text.lower().split():
+                vec[sum(map(ord, w)) % 16] += 1.0
+            rows.append({"index": i, "embedding": vec})
+        return httpx.Response(200, json={"data": rows[::-1]})       # out of order on purpose
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def provider(monkeypatch):
+    calls = []
+    monkeypatch.setenv("MO_EMBEDDINGS_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    emb = ranking.ProviderEmbedder("test-key-not-real", "https://api.openai.com/v1", "text-embedding-3-small",
+                                   transport=_fake_provider(calls))
+    monkeypatch.setattr(ranking, "_default_embedder", emb)
+    yield emb, calls, monkeypatch
+    monkeypatch.setattr(ranking, "_default_embedder", None)
+
+
+def test_provider_embedder_is_selected_when_configured_and_is_neural(provider):
+    emb, _, _ = provider
+    assert ranking.get_embedder() is emb and emb.neural and emb.name == "provider:text-embedding-3-small"
+
+
+def test_local_embedder_is_used_without_configuration(monkeypatch):
+    monkeypatch.delenv("MO_EMBEDDINGS_PROVIDER", raising=False)
+    monkeypatch.setattr(ranking, "_default_embedder", None)
+    assert ranking.get_embedder().name == "local-hashed-ngram" and ranking.get_embedder().neural is False
+
+
+def test_ingest_and_search_use_the_provider_and_keep_order(db, ctx, provider):
+    emb, calls, _ = provider
+    svc = _KS(db, ctx)
+    res = svc.ingest("Refunds", "Refunds are available within thirty days of purchase for all orders.")
+    assert res.data["embedder"] == emb.name and calls
+    hits = svc.search("refund window for orders")
+    assert hits and hits[0]["title"] == "Refunds" and hits[0]["dense"] > 0
+
+
+def test_restricted_documents_are_never_sent_to_the_provider(db, admin_ctx, provider):
+    from dataclasses import replace
+    emb, calls, _ = provider
+    rctx = replace(admin_ctx, data_classification="RESTRICTED")
+    res = _KS(db, rctx).ingest("Secret plan", "The confidential merger plan targets Q4 with the acquirer.", classification="RESTRICTED")
+    assert res.data["embedder"] == "local-hashed-ngram" and calls == []
+
+
+def test_provider_outage_indexes_nothing_and_search_falls_back_to_lexical(db, ctx, provider):
+    emb, calls, _ = provider
+    svc = _KS(db, ctx)
+    svc.ingest("Refunds", "Refunds are available within thirty days of purchase for all orders.")
+    emb.transport = _fake_provider(calls, status=503)
+    down = svc.ingest("Shipping", "Standard shipping takes five business days to most regions.")
+    assert down.state == ResultState.PROVIDER_UNAVAILABLE and len(svc.list_docs()) == 1
+    hits = svc.search("refund window orders")
+    assert hits and hits[0]["title"] == "Refunds" and hits[0]["dense"] == 0.0 and hits[0]["bm25"] > 0
+
+
+def test_documents_indexed_by_another_model_are_not_compared_with_the_wrong_vectors(db, ctx, provider, monkeypatch):
+    emb, calls, _ = provider
+    monkeypatch.delenv("MO_EMBEDDINGS_PROVIDER")
+    monkeypatch.setattr(ranking, "_default_embedder", None)
+    svc = _KS(db, ctx)                                       # local embedder
+    svc.ingest("Refunds", "Refunds are available within thirty days of purchase for all orders.")
+    monkeypatch.setenv("MO_EMBEDDINGS_PROVIDER", "openai")
+    monkeypatch.setattr(ranking, "_default_embedder", emb)
+    svc2 = _KS(db, ctx)
+    assert svc2.search("refund window orders")[0]["dense"] > 0          # embedded by the doc's own (local) model
+    out = svc2.reindex()
+    assert out.data["reindexed"] == 1 and svc2.list_docs()[0]["embedder"] == emb.name
+    assert svc2.reindex().data["reindexed"] == 0
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_provider_errors_raise_embedding_error(status):
+    e = ranking.ProviderEmbedder("k", "http://x", "m", transport=_fake_provider([], status))
+    with pytest.raises(ranking.EmbeddingError):
+        e.embed("hello")
+
+
+def test_provider_body_validation():
+    bad = httpx.MockTransport(lambda r: httpx.Response(200, json={"data": []}))
+    with pytest.raises(ranking.EmbeddingError):
+        ranking.ProviderEmbedder("k", "http://x", "m", transport=bad).embed("hello")
+    junk = httpx.MockTransport(lambda r: httpx.Response(200, text="not json"))
+    with pytest.raises(ranking.EmbeddingError):
+        ranking.ProviderEmbedder("k", "http://x", "m", transport=junk).embed("hello")
+
+
+def test_memory_always_uses_the_local_embedder(db, ctx, provider):
+    from app.mo.memory.store import MemoryStore
+    assert MemoryStore(db, ctx).embedder.name == "local-hashed-ngram"

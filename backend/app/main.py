@@ -62,7 +62,10 @@ with SessionLocal() as _seed_db:
     if _n:
         logger.info("Seeded %d dropship directory entries", _n)
 
+from .legacy_gate import legacy_gate  # noqa: E402
+
 app = FastAPI(
+    dependencies=[Depends(legacy_gate)],
     title="EZ-NEXUS AI Platform",
     description="Your AI Workforce for Business Growth™",
     version="1.0.0",
@@ -82,6 +85,8 @@ app.add_middleware(
 
 # Mount sub-routers
 app.include_router(auth_router)
+from .api.sso import router as _sso_router  # noqa: E402
+app.include_router(_sso_router)
 
 # ── MO NEXUS OMEGA control plane ─────────────────────────────────────────────
 # Mounted additively under /api/mo. Every legacy route above is untouched.
@@ -895,6 +900,10 @@ def mark_all_alerts_read(db: Session = Depends(get_db)):
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    from .auth import decode_token as _decode
+    if not _decode(websocket.query_params.get("token", "")):
+        await websocket.close(code=1008)          # policy violation: no valid token
+        return
     await hub.connect(websocket, client_id)
     try:
         while True:

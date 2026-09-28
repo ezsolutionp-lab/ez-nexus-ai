@@ -814,3 +814,33 @@ class DependencyRecord(Base, TenantMixin):
 
 
 AUTHORITY_TABLES = ["mo_capability_grants", "mo_receipts", "mo_agents", "mo_agent_releases", "mo_dependencies"]
+
+
+class KeyValueEntry(Base, TenantMixin):
+    """Tenant-scoped key/value store used by the workflow Database node."""
+
+    __tablename__ = "mo_kv"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    namespace = Column(String(80), nullable=False)
+    key = Column(String(200), nullable=False)
+    value_json = Column(Text, nullable=False)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "namespace", "key", name="uq_mo_kv"),)
+
+
+class A2ANonce(Base):
+    """Replay-protection nonces shared by every worker process."""
+
+    __tablename__ = "mo_a2a_nonces"
+
+    id = Column(String(64), primary_key=True, default=_uid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    peer = Column(String(64), nullable=False)
+    nonce = Column(String(128), nullable=False)
+    seen_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (UniqueConstraint("tenant_id", "peer", "nonce", name="uq_mo_a2a_nonce"),)
+
+
+SHARED_STATE_TABLES = ["mo_kv", "mo_a2a_nonces"]

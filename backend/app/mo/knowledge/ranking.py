@@ -16,6 +16,7 @@ Three independent signals, fused with reciprocal-rank fusion:
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections import Counter, defaultdict
 from typing import Iterable, Optional, Sequence
@@ -168,11 +169,84 @@ def normalise(scores: Sequence[float]) -> list[float]:
     return [s / top if top > 0 else 0.0 for s in scores]
 
 
+class ProviderEmbedder(Embedder):
+    """
+    A neural embedding model behind an OpenAI-compatible /embeddings endpoint. Configured with
+    MO_EMBEDDINGS_PROVIDER=openai plus OPENAI_API_KEY (or MO_EMBEDDINGS_API_KEY); MO_EMBEDDINGS_BASE_URL and
+    MO_EMBEDDINGS_MODEL override the defaults. Errors raise EmbeddingError; nothing is ever faked.
+    """
+
+    neural = True
+    MAX_BATCH = 64
+
+    def __init__(self, api_key: str, base_url: str, model: str, transport=None, timeout: float = 20.0) -> None:
+        self.api_key, self.base_url, self.model = api_key, base_url.rstrip("/"), model
+        self.transport, self.timeout = transport, timeout
+        self.name = f"provider:{model}"
+
+    def embed_many(self, texts: Sequence[str]) -> list[dict[int, float]]:
+        import httpx
+        out: list[dict[int, float]] = []
+        for i in range(0, len(texts), self.MAX_BATCH):
+            batch = [t[:8000] for t in texts[i:i + self.MAX_BATCH]]
+            try:
+                with httpx.Client(timeout=self.timeout, transport=self.transport) as http:
+                    resp = http.post(f"{self.base_url}/embeddings", json={"model": self.model, "input": batch},
+                                     headers={"Authorization": f"Bearer {self.api_key}"})
+            except httpx.HTTPError as exc:
+                raise EmbeddingError(f"embedding provider unreachable: {type(exc).__name__}") from exc
+            if resp.status_code in (401, 403):
+                raise EmbeddingError(f"embedding provider rejected the credential (HTTP {resp.status_code})")
+            if resp.status_code != 200:
+                raise EmbeddingError(f"embedding provider answered HTTP {resp.status_code}")
+            try:
+                rows = sorted(resp.json()["data"], key=lambda r: r["index"])
+                vecs = [r["embedding"] for r in rows]
+            except (ValueError, KeyError, TypeError) as exc:
+                raise EmbeddingError("embedding provider returned a malformed body") from exc
+            if len(vecs) != len(batch) or any(not isinstance(v, list) or not v for v in vecs):
+                raise EmbeddingError("embedding provider returned the wrong number of vectors")
+            for v in vecs:
+                norm = math.sqrt(sum(x * x for x in v)) or 1.0
+                out.append({j: x / norm for j, x in enumerate(v) if x})
+        return out
+
+    def embed(self, text: str) -> dict[int, float]:
+        return self.embed_many([text])[0]
+
+
+class EmbeddingError(RuntimeError):
+    pass
+
+
 _default_embedder: Optional[Embedder] = None
+_local_embedder: Optional[Embedder] = None
+
+
+def local_embedder() -> Embedder:
+    """The deterministic embedder. Memory always uses it, so its stored vectors never depend on a provider."""
+    global _local_embedder
+    if _local_embedder is None:
+        _local_embedder = HashedNgramEmbedder()
+    return _local_embedder
+
+
+def provider_configured() -> bool:
+    return os.getenv("MO_EMBEDDINGS_PROVIDER", "").lower() == "openai" and bool(
+        (os.getenv("MO_EMBEDDINGS_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip())
 
 
 def get_embedder() -> Embedder:
+    """A provider embedder when configured, else the local one (which reports itself as non-neural by name)."""
     global _default_embedder
-    if _default_embedder is None:
-        _default_embedder = HashedNgramEmbedder()
+    if provider_configured():
+        key = (os.getenv("MO_EMBEDDINGS_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+        base = os.getenv("MO_EMBEDDINGS_BASE_URL", "https://api.openai.com/v1")
+        model = os.getenv("MO_EMBEDDINGS_MODEL", "text-embedding-3-small")
+        cur = _default_embedder
+        if not (isinstance(cur, ProviderEmbedder) and (cur.api_key, cur.base_url, cur.model) == (key, base.rstrip("/"), model)):
+            _default_embedder = ProviderEmbedder(key, base, model)
+        return _default_embedder
+    if _default_embedder is None or isinstance(_default_embedder, ProviderEmbedder):
+        _default_embedder = local_embedder()
     return _default_embedder

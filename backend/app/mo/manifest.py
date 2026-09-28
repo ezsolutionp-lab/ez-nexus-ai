@@ -54,7 +54,9 @@ CAPABILITIES: list[dict[str, Any]] = [
        "app.mo.knowledge.service", "tests/mo_platform/test_knowledge.py",
        "Vectors are local hashed n-grams, not a neural embedding model. Refuses to answer on weak evidence."),
     _f("intelligence", "Neural embeddings", "credential_required", "app.mo.knowledge.ranking",
-       note="Needs an embedding provider; the embedder is pluggable and labelled honestly."),
+       "tests/mo_platform/test_knowledge.py",
+       "Provider adapter built (OpenAI-compatible /embeddings). Needs MO_EMBEDDINGS_PROVIDER=openai plus a key. "
+       "Tested against a mock transport only; RESTRICTED text is never sent, and memory stays on the local embedder."),
     _f("intelligence", "Layered memory (working, short, long, semantic, episodic, procedural)", "implemented",
        "app.mo.memory.store", "tests/mo_platform/test_memory.py"),
     _f("intelligence", "Time-series forecasting (Holt + seasonal) and anomaly detection", "implemented",
@@ -76,14 +78,16 @@ CAPABILITIES: list[dict[str, Any]] = [
     _f("intelligence", "Domain router (10 domains, weighted keywords and phrases, confidence, ambiguity)",
        "implemented", "app.mo.intelligence.router", "tests/mo_platform/test_truth.py",
        "Rule-based vocabulary matching; unknown vocabulary routes to 'general'."),
-    _f("intelligence", "Context compression and per-tenant semantic cache", "partial", "app.mo.modelfabric.context",
+    _f("intelligence", "Context compression and per-tenant semantic cache", "implemented", "app.mo.modelfabric.context",
        "tests/mo_platform/test_context.py",
-       "Extractive summary and a hashed n-gram cache, exposed as a tool and library. Not yet wired into ModelRouter "
-       "calls, and token counts are estimates."),
+       "Wired into ModelRouter (opt-in cache, complete_conversation). Extractive summary and a hashed n-gram cache; "
+       "token counts are estimates."),
     _f("intelligence", "Evaluation harness with deterministic graders and persisted runs", "implemented",
        "app.mo.evaluation.harness", "tests/mo_platform/test_evaluation.py"),
-    _f("intelligence", "LLM-as-judge evaluation", "credential_required", None,
-       note="Not implemented; would need a provider credential."),
+    _f("intelligence", "LLM-as-judge evaluation", "credential_required", "app.mo.evaluation.harness",
+       "tests/mo_platform/test_evaluation.py",
+       "Built. A judged case FAILS (never skips) until a model provider is configured. Judged text is injection-screened "
+       "and fenced. Tested with a stub grader."),
     # ── MO authority (permission-first execution) ──
     _f("authority", "Capability gateway: args-bound single-use grants, deny-list, finance guardrails, receipts, idempotency",
        "implemented", "app.mo.authority.gateway", "tests/mo_platform/test_authority.py",
@@ -113,8 +117,17 @@ CAPABILITIES: list[dict[str, Any]] = [
        "Contract and approval gate only. No OS driver exists, so real actions answer PROVIDER_UNAVAILABLE."),
     _f("authority", "Exchange / broker connectors", "planned", None,
        note="Not built. Would need exchange credentials and a security review."),
-    _f("authority", "Production SSO, container/micro-VM sandbox provider, browser adapter", "planned", None,
-       note="Not built. The sandbox is process-level."),
+    _f("authority", "OpenID Connect SSO", "credential_required", "app.mo.security.oidc",
+       "tests/security/test_sso_and_lockout.py",
+       "Built (asymmetric algorithms only, iss/aud/exp/verified-email enforced). Needs MO_OIDC_ISSUER and MO_OIDC_AUDIENCE. "
+       "Tested with locally generated keys, not a live identity provider."),
+    _f("authority", "Container / micro-VM sandbox provider and browser adapter", "planned", None,
+       note="Not built yet."),
+    _f("governance", "Authentication gate on all original EZ-NEXUS routes; patient routes admin-only and audited",
+       "implemented", "app.legacy_gate", "tests/security/test_legacy_gate.py",
+       "Legacy tables have no tenant column, so authenticated users share legacy data."),
+    _f("governance", "No committed admin password; password lockout after repeated failures", "implemented", "app.auth",
+       "tests/security/test_legacy_gate.py"),
     # ── orchestration & protocols ──
     _f("orchestration", "Multi-step orchestrator (DAG, retries, approvals, budgets, resume)", "partial",
        "app.mo.orchestration.runner", "tests/mo_platform/test_orchestration.py",
@@ -125,22 +138,29 @@ CAPABILITIES: list[dict[str, Any]] = [
        "Remote output is untrusted and injection-screened."),
     _f("protocols", "MCP server (JSON-RPC 2.0)", "implemented", "app.mo.protocols.mcp_server",
        "tests/mo_platform/test_protocols.py"),
-    _f("protocols", "A2A agent-to-agent (HMAC-SHA256, replay window)", "partial", "app.mo.protocols.a2a",
+    _f("protocols", "A2A agent-to-agent (HMAC-SHA256, replay window, shared nonce store)", "implemented", "app.mo.protocols.a2a",
        "tests/mo_platform/test_protocols.py",
-       "Nonce cache is per process; multi-replica deployments need a shared store."),
+       "Replay nonces live in the database so every worker sees them. Inbound tasks also need a tenant token and reach "
+       "only scope-free tools on a peer's allow-list."),
     _f("protocols", "Egress guard (SSRF / private-range blocking)", "partial", "app.mo.protocols.netguard",
        "tests/mo_platform/test_protocols.py", "Cannot fully close the DNS-rebinding window."),
     # ── build & voice ──
     _f("builder", "Universal builder runtime and reference build", "implemented", "app.mo.builder",
        "tests/integration/test_builder_api.py"),
+    _f("builder", "Workflow engine: all 17 node types executable (API, Webhook, Agent, Database, Transform, Switch, Loop, "
+       "Parallel, Subworkflow, Human Task, ...)", "implemented", "app.mo.builder.workflow_nodes",
+       "tests/builder/test_workflow_nodes.py",
+       "Parallel branches are isolated but run one after another. API/Webhook side effects need a granted approval."),
     _f("builder", "Sandbox execution", "partial", "app.mo.builder",
        note="Process-level isolation, not a container."),
     _f("builder", "Deployment adapters", "planned", None, note="No deploy adapter exists; deploys are not faked."),
     _f("voice", "Conversational voice assistant (wake phrase, follow-ups, governed commands)", "partial",
        "app.mo.voice.engine", "tests",
        "Recognition and synthesis run in the browser; the wake word is a transcript keyword, not acoustic."),
-    _f("voice", "Server-side speech-to-text / text-to-speech", "planned", None,
-       note="Audio never reaches the server today; a provider adapter with a credential is required."),
+    _f("voice", "Server-side speech-to-text / text-to-speech", "credential_required", "app.mo.voice.providers",
+       "tests/voice/test_voice_core.py",
+       "Whisper, Deepgram and ElevenLabs REST adapters built; each needs its key. Tested against mock transports only, "
+       "not the live services. Streaming transcription and speaker verification are not implemented."),
     # ── observability ──
     _f("observability", "Prometheus metrics and per-tenant tracing", "implemented",
        "app.mo.observability.metrics", "tests/mo_platform"),
@@ -152,10 +172,7 @@ CAPABILITIES: list[dict[str, Any]] = [
 ]
 
 KNOWN_BLOCKERS = [
-    "Legacy routes outside /api/mo are largely anonymous, including some that handle PHI.",
-    "A default administrator password is committed in the repository.",
-    "python-jose depends on ecdsa, which carries a published advisory; PyJWT would remove it.",
-    "Ten legacy workflow node types have no executor.",
+    "Legacy tables have no tenant column: authenticated users share the legacy data. Patient routes are admin-only and audited; true tenant isolation needs a schema migration.",
     "Orchestrator runs are synchronous; there is no background worker.",
 ]
 

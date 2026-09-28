@@ -164,4 +164,39 @@ def end_session(
             "turn_count": session.turn_count}
 
 
+@router.post("/transcribe")
+def transcribe_audio(payload: dict[str, Any] = Body(...), ctx: RequestContext = Depends(resolve_context)):
+    """Server-side transcription of one uploaded clip (base64). Needs a configured provider; audio is not stored."""
+    import base64
+    import binascii
+    from fastapi.responses import JSONResponse
+    from fastapi.encoders import jsonable_encoder
+    try:
+        ctx.require_scope("builder:write")
+        raw = base64.b64decode(str(payload.get("audio_b64", "")), validate=True)
+    except MoError as exc:
+        raise _http(exc)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="audio_b64 is not valid base64.")
+    language = str(payload.get("language", "en-US"))[:12]
+    res = get_voice_router().transcribe(raw, language=language)
+    status = 200 if res.state.is_success else HTTP_STATUS_FOR_STATE.get(res.state, 422)
+    return JSONResponse(status_code=status, content=jsonable_encoder(res.to_dict()))
+
+
+@router.post("/synthesize")
+def synthesize_speech(payload: dict[str, Any] = Body(...), ctx: RequestContext = Depends(resolve_context)):
+    """Server-side speech synthesis. Needs a configured provider; the browser console speaks locally without one."""
+    from fastapi.responses import JSONResponse
+    from fastapi.encoders import jsonable_encoder
+    try:
+        ctx.require_scope("builder:write")
+    except MoError as exc:
+        raise _http(exc)
+    res = get_voice_router().synthesize_audio(str(payload.get("text", "")), voice=str(payload.get("voice", "default"))[:64],
+                                        language=str(payload.get("language", "en-US"))[:12])
+    status = 200 if res.state.is_success else HTTP_STATUS_FOR_STATE.get(res.state, 422)
+    return JSONResponse(status_code=status, content=jsonable_encoder(res.to_dict()))
+
+
 ALL_ROUTERS = [read_router, router]

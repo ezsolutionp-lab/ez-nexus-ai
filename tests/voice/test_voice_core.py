@@ -43,13 +43,22 @@ def test_speaker_verification_is_never_faked():
     assert "bearer token" in result.detail
 
 
-def test_unimplemented_adapters_say_so():
-    from app.mo.voice.providers import DeepgramAdapter, WhisperAdapter
+def test_speaker_verification_adapter_says_it_is_unimplemented():
+    from app.mo.voice.providers import SpeakerVerifyAdapter
+    adapter = SpeakerVerifyAdapter()
+    assert adapter.info.implemented is False
+    result = adapter.verify_speaker(b"x", enrolled_id="owner")
+    assert result.state is ResultState.CREDENTIAL_REQUIRED and "no implementation" in result.detail
+
+
+def test_speech_providers_need_their_credential(monkeypatch):
+    from app.mo.voice.providers import DeepgramAdapter, ElevenLabsAdapter, WhisperAdapter
+    for var in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
     for adapter in (WhisperAdapter(), DeepgramAdapter()):
-        assert adapter.info.implemented is False
-        result = adapter.transcribe(b"x")
-        assert result.state is ResultState.CREDENTIAL_REQUIRED
-        assert "no implementation" in result.detail
+        assert adapter.info.implemented is True and adapter.info.configured is False
+        assert adapter.transcribe(b"x").state is ResultState.CREDENTIAL_REQUIRED
+    assert ElevenLabsAdapter().synthesize("hi").state is ResultState.CREDENTIAL_REQUIRED
 
 
 def test_capability_matrix_reports_gaps_honestly():
@@ -161,3 +170,87 @@ def test_spoken_list_caps_long_lists():
 
 def test_greetings_vary_between_turns():
     assert len({speech.greeting(i) for i in range(4)}) == 4
+
+
+# ── server-side providers (mock transport: the live services were not contacted) ──────────────────
+
+import base64
+
+import httpx
+
+
+def _mock(handler):
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def keys(monkeypatch):
+    for var, val in (("OPENAI_API_KEY", "k-openai"), ("DEEPGRAM_API_KEY", "k-dg"), ("ELEVENLABS_API_KEY", "k-el"),
+                     ("ELEVENLABS_VOICE_ID", "voice12345")):
+        monkeypatch.setenv(var, val)
+
+
+def test_whisper_transcribes_and_marks_output_untrusted(keys):
+    from app.mo.voice.providers import WhisperAdapter
+    seen = []
+    a = WhisperAdapter()
+    a.transport = _mock(lambda r: (seen.append(r), httpx.Response(200, json={"text": " open the dashboard "}))[1])
+    res = a.transcribe(b"RIFFdata", language="en-US")
+    assert res.state.is_success and res.data["text"] == "open the dashboard" and res.meta["untrusted"] is True
+    assert seen[0].headers["authorization"] == "Bearer k-openai" and b"whisper-1" in seen[0].content
+
+
+def test_deepgram_transcribes(keys):
+    from app.mo.voice.providers import DeepgramAdapter
+    body = {"results": {"channels": [{"alternatives": [{"transcript": "hello mo"}]}]}}
+    a = DeepgramAdapter()
+    a.transport = _mock(lambda r: httpx.Response(200, json=body))
+    assert a.transcribe(b"x").data["text"] == "hello mo"
+
+
+def test_elevenlabs_synthesizes_and_validates_voice(keys):
+    from app.mo.voice.providers import ElevenLabsAdapter
+    a = ElevenLabsAdapter()
+    a.transport = _mock(lambda r: httpx.Response(200, content=b"ID3audio", headers={"content-type": "audio/mpeg"}))
+    res = a.synthesize("Good morning")
+    assert res.state.is_success and base64.b64decode(res.data["audio_b64"]) == b"ID3audio"
+    assert a.synthesize("hi", voice="../etc/passwd").state is ResultState.FAILED
+    assert a.synthesize("").state is ResultState.FAILED and a.synthesize("x" * 6000).state is ResultState.FAILED
+
+
+@pytest.mark.parametrize("status,state", [(401, "POLICY_DENIED"), (429, "RATE_LIMITED"), (503, "PROVIDER_UNAVAILABLE"), (400, "FAILED")])
+def test_provider_errors_map_to_truthful_states(keys, status, state):
+    from app.mo.voice.providers import WhisperAdapter
+    a = WhisperAdapter()
+    a.transport = _mock(lambda r: httpx.Response(status, json={}))
+    assert a.transcribe(b"x").state.value == state
+
+
+def test_provider_timeouts_and_malformed_bodies(keys):
+    from app.mo.voice.providers import WhisperAdapter
+    a = WhisperAdapter()
+    def boom(request):
+        raise httpx.ReadTimeout("slow")
+    a.transport = _mock(boom)
+    assert a.transcribe(b"x").state is ResultState.TIMEOUT
+    a.transport = _mock(lambda r: httpx.Response(200, json={"nope": 1}))
+    assert a.transcribe(b"x").state is ResultState.FAILED
+
+
+def test_audio_limits(keys):
+    from app.mo.voice.providers import WhisperAdapter
+    a = WhisperAdapter()
+    assert a.transcribe(b"").state is ResultState.FAILED
+    assert a.transcribe(b"x" * (10 * 1024 * 1024 + 1)).state is ResultState.FAILED
+
+
+def test_router_transcribe_reports_what_is_missing(monkeypatch):
+    for var in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    res = get_voice_router().transcribe(b"x")
+    assert res.state is ResultState.CREDENTIAL_REQUIRED and "browser console" in res.detail
+
+
+def test_router_prefers_a_configured_provider_over_the_browser_adapter(keys):
+    res = get_voice_router().adapters_for(VoiceCapability.TRANSCRIBE)
+    assert {a.info.name for a in res} >= {"whisper", "deepgram"}

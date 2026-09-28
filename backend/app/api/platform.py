@@ -207,6 +207,16 @@ def delete_doc(doc_id: str, ctx: RequestContext = Depends(resolve_context), db: 
     return _respond(res)
 
 
+@_route(router, "post", "/knowledge/reindex")
+def reindex_docs(ctx: RequestContext = Depends(resolve_context), db: Session = Depends(get_db)):
+    _write(ctx)
+    if not ctx.is_admin:
+        return _respond(MoResult(ResultState.POLICY_DENIED, "Only an administrator can reindex the knowledge base."))
+    res = KnowledgeService(db, ctx).reindex()
+    db.commit()
+    return _respond(res)
+
+
 @_route(read_router, "post", "/knowledge/search")
 def search_docs(body: QueryIn, ctx: RequestContext = Depends(resolve_context), db: Session = Depends(get_db)):
     _read(ctx)

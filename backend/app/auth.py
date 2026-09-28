@@ -11,7 +11,11 @@ from typing import Optional
 import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+import os
+import secrets
+
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -21,6 +25,9 @@ from .database import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+MAX_FAILED_LOGINS = 5
+LOCKOUT_MINUTES = 15
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
@@ -99,10 +106,21 @@ def seed_admin(db: Session):
         models.User.email == settings.default_admin_email
     ).first()
     if not existing:
+        password = (settings.default_admin_password or "").strip()
+        if len(password) < 12:
+            if password:
+                logger.warning("DEFAULT_ADMIN_PASSWORD is shorter than 12 characters and was ignored.")
+            password = secrets.token_urlsafe(18)
+            path = settings.initial_admin_password_file
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as fh:
+                fh.write(password + "\n")
+            logger.warning("Generated an initial admin password and wrote it to %s (mode 0600). "
+                           "Read it once, sign in, and change it.", path)
         admin = models.User(
             email=settings.default_admin_email,
             full_name="EZ-NEXUS Admin",
-            hashed_password=hash_password(settings.default_admin_password),
+            hashed_password=hash_password(password),
             is_admin=True,
             is_active=True,
             plan="enterprise",
@@ -138,11 +156,20 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=schemas.TokenOut)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    if user and user.locked_until and user.locked_until > datetime.utcnow():
+        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Try again later.")
     if not user or not verify_password(form_data.password, user.hashed_password):
+        if user:
+            user.failed_login_count = (user.failed_login_count or 0) + 1
+            if user.failed_login_count >= MAX_FAILED_LOGINS:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_MINUTES)
+                user.failed_login_count = 0
+            db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated.")
 
+    user.failed_login_count, user.locked_until = 0, None
     user.last_login = datetime.utcnow()
     db.commit()
 

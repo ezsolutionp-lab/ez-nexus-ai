@@ -237,3 +237,18 @@ def test_a_long_conversation_is_not_throttled_but_builds_are(app_and_client, aut
     second = _say(client, auth, sid, "build me a booking website for a bakery")
     assert first["ok"] is True
     assert second["state"] == "RATE_LIMITED"
+
+
+def test_transcribe_and_synthesize_report_missing_providers_and_require_auth(app_and_client, auth, monkeypatch):
+    _, c, _ = app_and_client
+    for var in ("OPENAI_API_KEY", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    import base64
+    audio = base64.b64encode(b"RIFFfake").decode()
+    assert c.post("/api/mo/voice/transcribe", json={"audio_b64": audio}).status_code == 401
+    assert c.post("/api/mo/voice/synthesize", json={"text": "hi"}).status_code == 401
+    r = c.post("/api/mo/voice/transcribe", headers=auth, json={"audio_b64": audio})
+    assert r.status_code == 424 and r.json()["state"] == "CREDENTIAL_REQUIRED"
+    assert c.post("/api/mo/voice/transcribe", headers=auth, json={"audio_b64": "***"}).status_code == 422
+    s = c.post("/api/mo/voice/synthesize", headers=auth, json={"text": "hello"})
+    assert s.status_code == 424

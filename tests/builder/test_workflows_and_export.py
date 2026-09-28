@@ -96,14 +96,11 @@ def test_workflow_approval_node_passes_with_a_grant(db, admin_ctx, other_admin_c
     assert result.state is ResultState.SUCCESS
 
 
-def test_unimplemented_node_type_reports_blocked_not_success(db, admin_ctx):
-    """The directive's rule: never claim a step ran when it did not."""
-    spec = WorkflowSpec("Partial", "manual", (
-        {"id": "t", "type": "Trigger"},
-        {"id": "sub", "type": "Subworkflow", "workflow": "other"},
-        {"id": "out", "type": "Output"},
-    ))
+def test_a_node_type_outside_the_catalog_is_still_reported_blocked_not_success(db, admin_ctx):
+    """The directive's rule: never claim a step ran when it did not (guards a hand-edited stored workflow)."""
+    spec = WorkflowSpec("Partial", "manual", ({"id": "t", "type": "Trigger"}, {"id": "out", "type": "Output"}))
     row = wf.persist_workflow(db, admin_ctx, spec, project_id="p1")
+    row.nodes_json = json.dumps([{"id": "t", "type": "Trigger"}, {"id": "x", "type": "Teleport"}, {"id": "out", "type": "Output"}])
     result = wf.execute_workflow(db, admin_ctx, row)
     assert result.state is ResultState.BLOCKED
     assert "no executor wired" in result.detail

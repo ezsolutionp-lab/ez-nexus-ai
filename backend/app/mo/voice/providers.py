@@ -14,9 +14,10 @@ capability matrix:
                          transcript and returns the text to speak. This is the
                          adapter that makes the JARVIS console real today.
 
-  WhisperAdapter         Declared, not implemented. Needs OPENAI_API_KEY.
-  DeepgramAdapter        Declared, not implemented. Needs DEEPGRAM_API_KEY.
-  ElevenLabsAdapter      Declared, not implemented. Needs ELEVENLABS_API_KEY.
+  WhisperAdapter         Implemented (REST, batch). Needs OPENAI_API_KEY. Unit-tested against a mock
+                         transport only; it has not been exercised against the live service.
+  DeepgramAdapter        Implemented (REST, pre-recorded). Needs DEEPGRAM_API_KEY. Same test status.
+  ElevenLabsAdapter      Implemented (REST). Needs ELEVENLABS_API_KEY and a voice id. Same test status.
   TwilioVoiceAdapter     Backed by the existing real TwiML flow; needs Twilio.
   SpeakerVerifyAdapter   Declared, not implemented. Voice biometrics need a
                          provider; there is no offline substitute, so speaker
@@ -212,28 +213,136 @@ class _DeclaredOnlyAdapter(VoiceAdapter):
         )
 
 
-class WhisperAdapter(_DeclaredOnlyAdapter):
+class _HttpVoiceAdapter(VoiceAdapter):
+    """A speech provider reached over HTTPS. Errors map to truthful states; output is never fabricated."""
+
+    _name = "http"
+    _caps: frozenset[str] = frozenset()
+    _env = ""
+    _note = ""
+    _langs: tuple[str, ...] = ("en-US",)
+    MAX_AUDIO_BYTES = 10 * 1024 * 1024
+    MAX_TEXT_CHARS = 5000
+    transport: Optional[Any] = None          # tests inject an httpx.MockTransport
+    timeout = 30.0
+
+    @property
+    def info(self) -> VoiceProviderInfo:
+        return VoiceProviderInfo(
+            name=self._name, capabilities=self._caps, execution_site=ExecutionSite.PROVIDER,
+            credential_env_var=self._env, implemented=True, languages=self._langs, notes=self._note)
+
+    def _key(self) -> str:
+        return os.getenv(self._env, "").strip()
+
+    def _call(self, method: str, url: str, **kw: Any):
+        """Returns (response, None) or (None, MoResult)."""
+        import httpx
+        try:
+            with httpx.Client(timeout=self.timeout, transport=self.transport, follow_redirects=False) as http:
+                resp = http.request(method, url, **kw)
+        except httpx.TimeoutException:
+            return None, MoResult(ResultState.TIMEOUT, f"{self._name} did not answer within {self.timeout:.0f}s.")
+        except httpx.HTTPError as exc:
+            return None, MoResult(ResultState.PROVIDER_UNAVAILABLE, f"{self._name} is unreachable: {type(exc).__name__}.")
+        if resp.status_code in (401, 403):
+            return None, MoResult(ResultState.POLICY_DENIED, f"{self._name} rejected the credential (HTTP {resp.status_code}).")
+        if resp.status_code == 429:
+            return None, MoResult(ResultState.RATE_LIMITED, f"{self._name} is rate limiting this account.")
+        if resp.status_code >= 500:
+            return None, MoResult(ResultState.PROVIDER_UNAVAILABLE, f"{self._name} answered HTTP {resp.status_code}.")
+        if resp.status_code >= 400:
+            return None, MoResult(ResultState.FAILED, f"{self._name} refused the request (HTTP {resp.status_code}).")
+        return resp, None
+
+    def _audio_problem(self, audio: bytes) -> Optional[MoResult]:
+        if not isinstance(audio, (bytes, bytearray)) or not audio:
+            return MoResult(ResultState.FAILED, "No audio was supplied.")
+        if len(audio) > self.MAX_AUDIO_BYTES:
+            return MoResult(ResultState.FAILED, f"Audio is limited to {self.MAX_AUDIO_BYTES // (1024 * 1024)} MB.")
+        return None
+
+    def _gate(self, capability: str) -> Optional[MoResult]:
+        return None if self._key() else MoResult.credential_required(self._name, self._env)
+
+
+class WhisperAdapter(_HttpVoiceAdapter):
     _name = "whisper"
     _caps = frozenset({VoiceCapability.TRANSCRIBE})
     _env = "OPENAI_API_KEY"
-    _note = "Batch transcription of uploaded audio. Not streaming."
+    _note = "Batch transcription of uploaded audio via the OpenAI transcription API. Not streaming."
     _langs = ("en-US", "es-ES", "fr-FR", "de-DE", "hi-IN", "ar-SA", "zh-CN", "ja-JP")
 
+    def transcribe(self, audio: bytes, *, language: str = "en-US") -> MoResult:
+        if (gate := self._gate(VoiceCapability.TRANSCRIBE)) or (bad := self._audio_problem(audio)):
+            return gate or bad
+        resp, err = self._call(
+            "POST", os.getenv("MO_WHISPER_URL", "https://api.openai.com/v1/audio/transcriptions"),
+            headers={"Authorization": f"Bearer {self._key()}"},
+            data={"model": os.getenv("MO_WHISPER_MODEL", "whisper-1"), "language": language.split("-")[0]},
+            files={"file": ("audio.webm", bytes(audio), "application/octet-stream")})
+        if err:
+            return err
+        try:
+            text = str(resp.json()["text"]).strip()
+        except (ValueError, KeyError, TypeError):
+            return MoResult(ResultState.FAILED, "whisper returned a malformed body.")
+        return MoResult.ok({"text": text, "provider": self._name, "language": language}, untrusted=True)
 
-class DeepgramAdapter(_DeclaredOnlyAdapter):
+
+class DeepgramAdapter(_HttpVoiceAdapter):
     _name = "deepgram"
-    _caps = frozenset({VoiceCapability.TRANSCRIBE, VoiceCapability.STREAM_TRANSCRIBE,
-                       VoiceCapability.VAD})
+    _caps = frozenset({VoiceCapability.TRANSCRIBE})
     _env = "DEEPGRAM_API_KEY"
-    _note = "Low-latency streaming transcription with server-side VAD — the adapter "
-    "to implement if browser recognition is not acceptable."
+    _note = ("Pre-recorded transcription over REST. Streaming transcription and server-side VAD are not "
+             "implemented, so they are not listed as capabilities.")
+
+    def transcribe(self, audio: bytes, *, language: str = "en-US") -> MoResult:
+        if (gate := self._gate(VoiceCapability.TRANSCRIBE)) or (bad := self._audio_problem(audio)):
+            return gate or bad
+        resp, err = self._call(
+            "POST", os.getenv("MO_DEEPGRAM_URL", "https://api.deepgram.com/v1/listen"),
+            params={"language": language, "punctuate": "true", "smart_format": "true"},
+            headers={"Authorization": f"Token {self._key()}", "Content-Type": "application/octet-stream"},
+            content=bytes(audio))
+        if err:
+            return err
+        try:
+            text = str(resp.json()["results"]["channels"][0]["alternatives"][0]["transcript"]).strip()
+        except (ValueError, KeyError, IndexError, TypeError):
+            return MoResult(ResultState.FAILED, "deepgram returned a malformed body.")
+        return MoResult.ok({"text": text, "provider": self._name, "language": language}, untrusted=True)
 
 
-class ElevenLabsAdapter(_DeclaredOnlyAdapter):
+class ElevenLabsAdapter(_HttpVoiceAdapter):
     _name = "elevenlabs"
     _caps = frozenset({VoiceCapability.SYNTHESIZE})
     _env = "ELEVENLABS_API_KEY"
-    _note = "High-quality synthesis with custom voices."
+    _note = "Speech synthesis. A voice id must be passed, or set ELEVENLABS_VOICE_ID for the default voice."
+
+    def synthesize(self, text: str, *, voice: str = "default", language: str = "en-US") -> MoResult:
+        import base64
+        if (gate := self._gate(VoiceCapability.SYNTHESIZE)):
+            return gate
+        if not isinstance(text, str) or not text.strip():
+            return MoResult(ResultState.FAILED, "There is no text to speak.")
+        if len(text) > self.MAX_TEXT_CHARS:
+            return MoResult(ResultState.FAILED, f"Text is limited to {self.MAX_TEXT_CHARS} characters.")
+        voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip() if voice == "default" else voice
+        if not voice_id:
+            return MoResult.credential_required("elevenlabs default voice", "ELEVENLABS_VOICE_ID")
+        if not re.fullmatch(r"[A-Za-z0-9]{6,64}", voice_id):
+            return MoResult(ResultState.FAILED, "The voice id is not valid.")
+        resp, err = self._call(
+            "POST", f"{os.getenv('MO_ELEVENLABS_URL', 'https://api.elevenlabs.io/v1/text-to-speech').rstrip('/')}/{voice_id}",
+            headers={"xi-api-key": self._key(), "Accept": "audio/mpeg"},
+            json={"text": text, "model_id": os.getenv("MO_ELEVENLABS_MODEL", "eleven_multilingual_v2")})
+        if err:
+            return err
+        if not resp.content or len(resp.content) > 20 * 1024 * 1024:
+            return MoResult(ResultState.FAILED, "elevenlabs returned no audio or too much of it.")
+        return MoResult.ok({"audio_b64": base64.b64encode(resp.content).decode(), "mime": resp.headers.get("content-type", "audio/mpeg"),
+                            "provider": self._name, "bytes": len(resp.content)})
 
 
 class SpeakerVerifyAdapter(_DeclaredOnlyAdapter):
@@ -346,6 +455,30 @@ class VoiceRouter:
     def pick(self, capability: str) -> Optional[VoiceAdapter]:
         candidates = self.adapters_for(capability)
         return candidates[0] if candidates else None
+
+    def transcribe(self, audio: bytes, *, language: str = "en-US") -> MoResult:
+        adapter = None
+        for a in self.adapters_for(VoiceCapability.TRANSCRIBE):
+            if a.info.execution_site == ExecutionSite.PROVIDER:      # the browser adapter cannot receive audio
+                adapter = a
+                break
+        if adapter is None:
+            return MoResult(
+                ResultState.CREDENTIAL_REQUIRED,
+                "No server-side transcription provider is configured. Set OPENAI_API_KEY (whisper) or "
+                "DEEPGRAM_API_KEY; the browser console transcribes locally without either.",
+                meta={"capability": VoiceCapability.TRANSCRIBE})
+        return adapter.transcribe(audio, language=language)
+
+    def synthesize_audio(self, text: str, *, voice: str = "default", language: str = "en-US") -> MoResult:
+        """Server-rendered audio from a provider. The browser adapter speaks locally and cannot produce audio here."""
+        for a in self.adapters_for(VoiceCapability.SYNTHESIZE):
+            if a.info.execution_site == ExecutionSite.PROVIDER:
+                return a.synthesize(text, voice=voice, language=language)
+        return MoResult(
+            ResultState.CREDENTIAL_REQUIRED,
+            "No server-side synthesis provider is configured. Set ELEVENLABS_API_KEY; the browser console "
+            "speaks locally without it.", meta={"capability": VoiceCapability.SYNTHESIZE, "env_var": "ELEVENLABS_API_KEY"})
 
     def synthesize(self, text: str, *, voice: str = "default", language: str = "en-US") -> MoResult:
         adapter = self.pick(VoiceCapability.SYNTHESIZE)

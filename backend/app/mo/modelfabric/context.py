@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..guards import pii
-from ..knowledge.ranking import cosine, get_embedder, terms
+from ..knowledge.ranking import cosine, local_embedder, terms
 
 CHARS_PER_TOKEN = 4
 MAX_TURNS = 5_000
@@ -121,7 +121,7 @@ class SemanticCache:
         self._store: OrderedDict[tuple[str, str, int], dict[str, Any]] = OrderedDict()
         self._seq = 0
         self._lock = threading.Lock()
-        self._embedder = get_embedder()
+        self._embedder = local_embedder()
         self.hits = self.misses = 0
 
     def put(self, tenant_id: str, question: str, answer: str, *, namespace: str = "default",
