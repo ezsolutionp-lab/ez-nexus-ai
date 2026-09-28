@@ -30,6 +30,34 @@ Example conversation (real output from the test-verified engine):
 
 Say **"help"** for more examples, or `GET /api/mo/voice/commands`.
 
+## The Jarvis register
+
+Call it **MO** or **Jarvis** ("Jarvis", "hey Jarvis", "okay Jarvis", "MO"). What it does:
+
+- **Wake and brief.** On a fresh wake (or after half an hour of quiet) it greets you for your local time of day and gives one
+  honest status line: `Good evening, boss. Systems are up. One build has failed and two approvals are waiting on you.` It only
+  says "All systems are running normally" when the audit trail verifies and nothing needs you.
+- **Your form of address.** boss, sir, ma'am, chief, your name, or none. Set it in *Voice settings*; MO never assumes one.
+- **Situational awareness.** "Brief me", "what did I miss", "run diagnostics" (database, audit trail, tools, model, sandbox
+  isolation, server speech), "what time is it" (in your timezone).
+- **Small talk.** Thanks, "how are you", "who are you" (it says it is software), "good morning", and "that will be all" to stand
+  down.
+- **Offers.** After a build it asks *Shall I bring up the preview?* and "yes please" / "not now" work. An accepted offer runs
+  through exactly the same scope, MFA and approval gates as if you had asked for it.
+- **Bad news first.** "I'm afraid the build failed, boss." It never softens a failure into something that sounds like success.
+- **Free-form requests.** With a model provider connected, a request that matches no phrase is mapped to one of the *existing*
+  intents ("get me up to speed on where everything stands" becomes the briefing) and then goes through the normal gates. Anything
+  else becomes conversation: at most three spoken sentences, which cannot take actions or claim to have taken any.
+- **Voice.** The console picks the closest voice your browser has to a calm British male (for example Daniel or Google UK English
+  Male), slightly slower and lower than default. You can choose a voice, speed and pitch. Which voices exist depends on your
+  browser and operating system.
+- **Talking naturally.** You can talk over MO to interrupt it, it ignores its own voice, and utterances that arrive while it is
+  still answering are queued rather than dropped.
+
+What it is not: the film character. It has no persistent physical-world reach, its commands are the intents listed by
+*help* (plus what a connected model can map onto them), approving a high-impact action by voice is refused by design, and
+wake-word detection is transcript-level rather than an always-on acoustic model.
+
 ## Honest limitations
 
 These are real gaps, not roadmap decoration. `GET /api/mo/voice/capabilities`

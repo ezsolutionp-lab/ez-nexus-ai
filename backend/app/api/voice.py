@@ -34,6 +34,7 @@ from ..mo.context import RequestContext
 from ..mo.db import VoiceSession, VoiceTurn
 from ..mo.errors import HTTP_STATUS_FOR_STATE, MoError
 from ..mo.security.zero_trust import mo_router, resolve_context
+from ..mo.voice import persona as personas
 from ..mo.voice.engine import VoiceEngine
 from ..mo.voice.intents import help_examples
 from ..mo.voice.providers import WakeWordConfig, get_voice_router
@@ -85,12 +86,16 @@ def start_session(
 ) -> dict[str, Any]:
     ctx.require_scope("builder:read")
     engine = _engine(db, ctx)
-    session = engine.start_session(language=str(payload.get("language", "en-US"))[:16])
+    session = engine.start_session(language=str(payload.get("language", "en-US"))[:16],
+                                   address=payload.get("address"), timezone=payload.get("timezone"))
     db.commit()
     wake = WakeWordConfig()
+    persona = json.loads(session.persona_json or "{}")
     return {
         "session_id": session.id,
         "language": session.language,
+        "persona": {"address": persona.get("address"), "timezone": persona.get("timezone"),
+                    "address_presets": [a for a in personas.PRESET_ADDRESSES]},
         "wake_phrases": list(wake.phrases),
         "follow_up_window_seconds": wake.follow_up_window_seconds,
         "wake_word_mode": wake.mode,

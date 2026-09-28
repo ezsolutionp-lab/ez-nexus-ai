@@ -175,9 +175,13 @@ CAPABILITIES: list[dict[str, Any]] = [
        "tests/builder/test_approvals_and_deploy.py",
        "Off unless MO_DEPLOY_ADAPTER is set. Both adapters report PARTIAL, never SUCCESS: the bundle is not launched and a hook "
        "trigger is not confirmed. No cloud-provider management API adapter exists."),
-    _f("voice", "Conversational voice assistant (wake phrase, follow-ups, governed commands)", "partial",
-       "app.mo.voice.engine", "tests",
-       "Recognition and synthesis run in the browser; the wake word is a transcript keyword, not acoustic."),
+    _f("voice", "Conversational voice assistant: Jarvis-style persona (address, time-aware briefing, offers, diagnostics, "
+       "model-assisted free-form requests), wake phrase, follow-ups, governed commands", "partial", "app.mo.voice.engine",
+       "tests/voice/test_jarvis_persona.py",
+       "Recognition and synthesis run in the browser (Chrome, Edge or Safari); the wake word is a transcript keyword, not acoustic, "
+       "so the browser transcribes continuously. Free-form requests and open conversation need a model provider; commands are "
+       "otherwise phrase-matched. The end-to-end browser test uses scripted speech, so real microphone and voice quality are "
+       "not covered."),
     _f("voice", "Server-side speech-to-text / text-to-speech", "credential_required", "app.mo.voice.providers",
        "tests/voice/test_voice_core.py",
        "Whisper, Deepgram and ElevenLabs REST adapters built; each needs its key. Tested against mock transports only, "

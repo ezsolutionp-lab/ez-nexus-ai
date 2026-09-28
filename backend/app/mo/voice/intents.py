@@ -54,6 +54,13 @@ class IntentName(str, Enum):
     # Tools / workforce
     LIST_TOOLS = "tool.list"
 
+    # Presence and situational awareness
+    SYSTEM_BRIEFING = "system.briefing"
+    SYSTEM_DIAGNOSTICS = "system.diagnostics"
+    SYSTEM_TIME = "system.time"
+    SMALLTALK = "conversation.smalltalk"
+    CHAT = "conversation.chat"
+
     # Conversation control
     HELP = "conversation.help"
     REPEAT = "conversation.repeat"
@@ -197,6 +204,28 @@ INTENT_SPECS: dict[IntentName, IntentSpec] = {
         required_scope="builder:read",
         examples=("list the tools", "what tools are registered"),
     ),
+    IntentName.SYSTEM_BRIEFING: IntentSpec(
+        IntentName.SYSTEM_BRIEFING, "Give a short briefing on what needs attention.",
+        required_scope="builder:read",
+        examples=("brief me", "what did I miss", "catch me up", "give me the rundown"),
+    ),
+    IntentName.SYSTEM_DIAGNOSTICS: IntentSpec(
+        IntentName.SYSTEM_DIAGNOSTICS, "Run a read-only self-check of the platform and report each subsystem.",
+        required_scope="builder:read",
+        examples=("run diagnostics", "run a full system check", "give me a status report"),
+    ),
+    IntentName.SYSTEM_TIME: IntentSpec(
+        IntentName.SYSTEM_TIME, "Tell the time or date in the user's timezone.",
+        slots=("kind",), examples=("what time is it", "what's the date today"),
+    ),
+    IntentName.SMALLTALK: IntentSpec(
+        IntentName.SMALLTALK, "Greetings, thanks, and a few questions about MO itself.",
+        slots=("kind",), examples=("good morning", "thank you", "who are you", "that will be all"),
+    ),
+    IntentName.CHAT: IntentSpec(
+        IntentName.CHAT, "Answer a general question in conversation (needs a model provider; takes no actions).",
+        required_scope="builder:read",
+    ),
     IntentName.HELP: IntentSpec(
         IntentName.HELP, "Explain what can be said.",
         examples=("help", "what can I say", "give me some examples"),
@@ -293,6 +322,10 @@ def _named_slot(slot: str) -> Callable[[re.Match, str], dict[str, Any]]:
     return extract
 
 
+def _kind(kind: str) -> Callable[[re.Match, str], dict[str, Any]]:
+    return lambda match, text: {"kind": kind}
+
+
 _Rule = tuple[IntentName, str, float, Optional[Callable[[re.Match, str], dict[str, Any]]]]
 
 GRAMMAR: tuple[_Rule, ...] = (
@@ -303,6 +336,20 @@ GRAMMAR: tuple[_Rule, ...] = (
     (IntentName.HELP, r"^(help|what can i say|what can you do|give me examples?)\b", 0.9, None),
     (IntentName.SYSTEM_CAPABILITIES, r"\b(what (are your |can you do)|list your )?capabilit(y|ies)\b", 0.92, None),
     (IntentName.SYSTEM_CAPABILITIES, r"\bwhat (can|are) you (do|able to do|capable of)\b", 0.88, None),
+
+    # Presence — short phrases people say to an assistant, matched anchored so they never swallow a command.
+    (IntentName.SMALLTALK, r"^(thanks|thank you|cheers|much appreciated|nice work|good job|well done|great job|perfect)\b", 0.95, _kind("thanks")),
+    (IntentName.SMALLTALK, r"\bhow are you( doing| today)?\b|\bhow'?s it going\b", 0.92, _kind("how_are_you")),
+    (IntentName.SMALLTALK, r"\bwho are you\b|\bwhat are you\b(?! (able|capable|going|doing))|\bwhat'?s your name\b|\bintroduce yourself\b", 0.93, _kind("who_are_you")),
+    (IntentName.SMALLTALK, r"^(are you (there|awake|listening|up)|you there|hello|hi|hey|good (morning|afternoon|evening)|daddy'?s home|i'?m back)\b", 0.9, _kind("greeting")),
+    (IntentName.SMALLTALK, r"^(good ?night|goodbye|bye|see you( later)?|that'?s all|that will be all|i'?m done|stand down|dismissed)\b", 0.93, _kind("dismiss")),
+    (IntentName.SYSTEM_TIME, r"\bwhat(?:'s| is) the (time|date)\b|\bwhat time is it\b|\bwhat day is it\b|\btoday'?s date\b|\bwhat'?s today\b|\bwhat is today\b",
+     0.94, lambda m, t: {"kind": "date" if re.search(r"date|day|today", t.lower()) and "time" not in t.lower() else "time"}),
+    (IntentName.SYSTEM_BRIEFING,
+     r"\b(brief me|briefing|catch me up|what did i miss|what'?s (happening|new|going on)|rundown|fill me in|anything (i should know|new))\b", 0.93, None),
+    (IntentName.SYSTEM_DIAGNOSTICS,
+     r"\b(run|do|perform|start|begin)\b.{0,15}\b(diagnostics?|self.?check|system check|full check)\b", 0.96, None),
+    (IntentName.SYSTEM_DIAGNOSTICS, r"\b(status report|systems? report|full report|diagnostics?)\b", 0.88, None),
 
     # Deployment — before the generic build rules so "deploy" never reads as "build".
     (IntentName.CANCEL_DEPLOY,
@@ -332,7 +379,7 @@ GRAMMAR: tuple[_Rule, ...] = (
 
     # Project creation — the description slot is the rest of the utterance.
     (IntentName.BUILD_PROJECT,
-     r"\b(?:build|create|make|generate|set ?up|spin ?up)\s+(?:me\s+)?(?:a|an|the)?\s*(?P<description>.+)",
+     r"\b(?:build|create|make|generate|set ?up|spin ?up)\s+(?:me\s+)?(?!(?:sure|certain|it|that|this|them|sense|time|way|room|up|do|a (?:note|call|copy|decision|wish|list|difference|move|mistake|plan)|an? (?:exception|effort))\b)(?:a|an|the)?\s*(?P<description>.+)",
      0.85, _description_slot),
     (IntentName.BUILD_PROJECT,
      r"\bi (?:want|need)\s+(?:a|an)?\s*(?P<description>.+)", 0.7, _description_slot),

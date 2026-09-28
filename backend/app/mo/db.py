@@ -510,6 +510,8 @@ class VoiceSession(Base, TenantMixin):
     pending_slots_json = Column(Text, nullable=False, default="{}")
     last_response = Column(Text, nullable=True)
     turn_count = Column(Integer, nullable=False, default=0)
+    # Voice persona for this conversation: form of address, timezone, last-seen and last-briefed times.
+    persona_json = Column(Text, nullable=False, default="{}")
     ended_at = Column(DateTime, nullable=True)
 
 

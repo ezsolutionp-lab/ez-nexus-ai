@@ -382,7 +382,8 @@ class TwilioVoiceAdapter(VoiceAdapter):
 
 # ── Wake word ────────────────────────────────────────────────────────────────
 
-DEFAULT_WAKE_PHRASES: tuple[str, ...] = ("mo", "hey mo", "okay mo", "hey nexus", "jarvis")
+DEFAULT_WAKE_PHRASES: tuple[str, ...] = ("mo", "hey mo", "okay mo", "ok mo", "hey nexus", "jarvis", "hey jarvis", "okay jarvis",
+                                          "ok jarvis", "hi jarvis", "yo jarvis")
 
 
 @dataclass

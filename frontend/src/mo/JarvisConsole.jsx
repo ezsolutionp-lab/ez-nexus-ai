@@ -62,21 +62,38 @@ export function isEcho(heard, spoken, threshold = 0.6) {
   return overlap / h.length >= threshold
 }
 
-/* Pick a natural-sounding voice when the browser offers one. */
-function chooseVoice(lang) {
+/* Voice preferences live in this browser only. */
+const PREFS_KEY = 'jv_prefs'
+const ADDRESS_PRESETS = ['boss', 'sir', "ma'am", 'chief', '']
+function loadPrefs() {
+  try { return { address: 'boss', voice: '', rate: 0.98, pitch: 0.88, ...(JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')) } }
+  catch { return { address: 'boss', voice: '', rate: 0.98, pitch: 0.88 } }
+}
+function savePrefs(p) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)) } catch { /* private mode */ } }
+const timezone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
+
+/*
+ * Pick the voice: the user's choice if it still exists, else the closest thing the browser has to a calm, measured
+ * British male voice (the register this assistant speaks in), else any local voice in the session language.
+ * Which voices exist is decided by the browser and operating system, not by MO.
+ */
+const JARVIS_LIKE = ['Google UK English Male', 'Daniel', 'Arthur', 'Oliver', 'Microsoft George', 'Microsoft Ryan', 'Alex']
+function chooseVoice(lang, wanted = '') {
   if (!canSpeak) return null
-  const voices = window.speechSynthesis.getVoices().filter(v => v.lang?.startsWith(lang.slice(0, 2)))
-  const preferred = ['Google UK English Male', 'Daniel', 'Google US English', 'Samantha', 'Alex']
-  for (const name of preferred) {
-    const v = voices.find(x => x.name === name)
+  const all = window.speechSynthesis.getVoices()
+  const chosen = wanted && all.find(v => v.name === wanted)
+  if (chosen) return chosen
+  const voices = all.filter(v => v.lang?.startsWith(lang.slice(0, 2)))
+  for (const name of JARVIS_LIKE) {
+    const v = voices.find(x => x.name.includes(name))
     if (v) return v
   }
-  return voices.find(v => v.localService) || voices[0] || null
+  return voices.find(v => v.lang === 'en-GB') || voices.find(v => v.localService) || voices[0] || null
 }
 
 const MODE_LABEL = {
   off: 'Microphone off',
-  asleep: 'Listening for “MO”',
+  asleep: 'Listening for “MO” or “Jarvis”',
   awake: 'I’m listening',
   thinking: 'Working on it',
   speaking: 'Speaking',
@@ -92,12 +109,16 @@ export default function JarvisConsole({ token }) {
   const [level, setLevel] = useState(0)
   const [muted, setMuted] = useState(false)
   const [examples, setExamples] = useState([])
+  const [prefs, setPrefs] = useState(loadPrefs)
+  const [voices, setVoices] = useState([])
 
   const recRef = useRef(null)
   const wantListening = useRef(false)
   const speakingText = useRef('')      // what MO is saying right now, for echo checks
   const lastSpoken = useRef('')        // what MO said last, echo can trail playback
   const busy = useRef(false)
+  const queued = useRef([])            // utterances that arrived while MO was still handling the last one
+  const sendRef = useRef(null)
   const audio = useRef({ ctx: null, stream: null, raf: 0 })
   const sessionRef = useRef(null)
   const logEnd = useRef(null)
@@ -111,25 +132,35 @@ export default function JarvisConsole({ token }) {
     let cancelled = false
     ;(async () => {
       try {
-        const s = await call('/api/mo/voice/sessions', { method: 'POST', token, body: {} })
+        const s = await call('/api/mo/voice/sessions', { method: 'POST', token,
+          body: { address: prefs.address, timezone: timezone() } })
         if (!cancelled) setSession(s)
         const c = await call('/api/mo/voice/commands', { token })
         if (!cancelled) setExamples(c.examples.slice(0, 8))
       } catch (e) { if (!cancelled) setError(e.message) }
     })()
-    if (canSpeak) window.speechSynthesis.getVoices()   // warms the voice list
+    if (canSpeak) {
+      const refresh = () => setVoices(window.speechSynthesis.getVoices().filter(v => v.lang?.startsWith('en')))
+      refresh()
+      window.speechSynthesis.addEventListener?.('voiceschanged', refresh)
+    }
     return () => { cancelled = true }
-  }, [token])
+  }, [token, prefs.address])
+
+  const updatePrefs = useCallback((patch) => {
+    setPrefs(p => { const next = { ...p, ...patch }; savePrefs(next); return next })
+  }, [])
 
   /* ── MO speaks ───────────────────────────────────────────────────────── */
   const speak = useCallback((text) => {
     if (!text || !canSpeak || muted) return
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(text)
-    const v = chooseVoice(session?.language || 'en-US')
+    const v = chooseVoice(session?.language || 'en-US', prefs.voice)
     if (v) u.voice = v
-    u.rate = 1.02
-    u.pitch = 1.0
+    if (v?.lang) u.lang = v.lang
+    u.rate = prefs.rate
+    u.pitch = prefs.pitch
     speakingText.current = text
     u.onstart = () => setMode('speaking')
     const done = () => {
@@ -140,7 +171,7 @@ export default function JarvisConsole({ token }) {
     u.onend = done
     u.onerror = done
     window.speechSynthesis.speak(u)
-  }, [muted, session])
+  }, [muted, session, prefs])
 
   /* Stop MO mid-sentence — barge-in. */
   const interrupt = useCallback(() => {
@@ -155,7 +186,8 @@ export default function JarvisConsole({ token }) {
   /* ── Send one utterance to MO ─────────────────────────────────────────── */
   const send = useCallback(async (transcript) => {
     const s = sessionRef.current
-    if (!s || !transcript.trim() || busy.current) return
+    if (!s || !transcript.trim()) return
+    if (busy.current) { queued.current.push(transcript); return }          // never drop what the user said
     busy.current = true
     setMode(m => (m === 'speaking' ? m : 'thinking'))
     try {
@@ -178,8 +210,11 @@ export default function JarvisConsole({ token }) {
       setMode(wantListening.current ? 'asleep' : 'off')
     } finally {
       busy.current = false
+      const next = queued.current.shift()
+      if (next) setTimeout(() => sendRef.current?.(next), 0)
     }
   }, [token, speak, muted])
+  useEffect(() => { sendRef.current = send }, [send])
 
   /* ── Microphone level meter (visual proof MO can hear you) ────────────── */
   const startMeter = useCallback(async () => {
@@ -313,8 +348,8 @@ export default function JarvisConsole({ token }) {
         <div className="jv-status" role="status" aria-live="polite">
           <div className="jv-status__mode">{MODE_LABEL[mode]}</div>
           <div className="jv-status__hint">
-            {mode === 'off' && 'Tap the orb, then say “MO”.'}
-            {mode === 'asleep' && 'Say “MO” to wake me.'}
+            {mode === 'off' && 'Tap the orb, then say “MO” or “Jarvis”.'}
+            {mode === 'asleep' && 'Say “MO” or “Jarvis” to wake me.'}
             {mode === 'awake' && 'Go ahead — no need to say my name again for a bit.'}
             {mode === 'thinking' && 'One moment…'}
             {mode === 'speaking' && 'Talk over me any time to interrupt.'}
@@ -343,7 +378,7 @@ export default function JarvisConsole({ token }) {
           <div className="jv-intro">
             <p>Try saying:</p>
             <ul>
-              <li>“MO”</li>
+              <li>“Jarvis”</li>
               {examples.slice(0, 6).map(x => <li key={x.say}>“{x.say}”</li>)}
             </ul>
           </div>
@@ -363,11 +398,50 @@ export default function JarvisConsole({ token }) {
         <div ref={logEnd} />
       </div>
 
+
+      <details className="jv-settings">
+        <summary>Voice settings</summary>
+        <label>
+          Call me
+          <select value={ADDRESS_PRESETS.includes(prefs.address) ? prefs.address : '__custom'}
+                  onChange={e => updatePrefs({ address: e.target.value === '__custom' ? 'friend' : e.target.value })}>
+            {ADDRESS_PRESETS.map(a => <option key={a} value={a}>{a === '' ? '(no form of address)' : a}</option>)}
+            <option value="__custom">a name…</option>
+          </select>
+        </label>
+        {!ADDRESS_PRESETS.includes(prefs.address) && (
+          <input aria-label="Your name" maxLength={24} value={prefs.address}
+                 onChange={e => updatePrefs({ address: e.target.value.replace(/[^A-Za-z .'-]/g, '') })} />
+        )}
+        <label>
+          Voice
+          <select value={prefs.voice} onChange={e => updatePrefs({ voice: e.target.value })}>
+            <option value="">Automatic (closest to a calm British male)</option>
+            {voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+          </select>
+        </label>
+        <label>Speed
+          <input type="range" min="0.7" max="1.3" step="0.02" value={prefs.rate}
+                 onChange={e => updatePrefs({ rate: Number(e.target.value) })} />
+        </label>
+        <label>Pitch
+          <input type="range" min="0.6" max="1.3" step="0.02" value={prefs.pitch}
+                 onChange={e => updatePrefs({ pitch: Number(e.target.value) })} />
+        </label>
+        <button type="button" className="jv-btn" onClick={() => speak(`At your service${prefs.address ? ', ' + prefs.address : ''}.`)}>
+          Test voice
+        </button>
+        <p className="jv-privacy">
+          The available voices come from your browser and operating system. Changing the form of address starts a fresh
+          conversation.
+        </p>
+      </details>
+
       <form className="jv-type" onSubmit={submitTyped}>
         <input
           value={typed}
           onChange={e => setTyped(e.target.value)}
-          placeholder="Or type to MO — e.g. “MO, build a booking site for a dentist”"
+          placeholder="Or type — e.g. “Jarvis, run diagnostics” or “brief me”"
           aria-label="Type a message to MO"
         />
         <button type="submit" disabled={!typed.trim() || !session}>Send</button>

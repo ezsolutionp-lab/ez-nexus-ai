@@ -1974,3 +1974,9 @@ tbody td { padding: 10px 14px; vertical-align: middle; }
 .cc-result { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px; }
 .cc-result pre { margin: 6px 0 0; max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
 .cc-detail { margin: 6px 0 0; font-size: 13px; color: #334155; }
+
+/* Jarvis voice settings */
+.jv-settings { border: 1px solid #1E3A5F33; border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.jv-settings summary { cursor: pointer; font-weight: 600; }
+.jv-settings label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0; }
+.jv-settings select, .jv-settings input[type="text"], .jv-settings input:not([type]) { max-width: 60%; }
