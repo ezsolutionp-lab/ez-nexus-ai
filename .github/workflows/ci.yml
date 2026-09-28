@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify the migration chain applies to an empty database
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:///./ci_chain.db
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade base
+          python -m alembic upgrade head
+
+      - name: Run the test suite
+        env:
+          SECRET_KEY: ci-secret-key-not-used-for-anything-real
+        run: python -m pytest tests -q --junitxml=pytest-report.xml
+
+      - name: Security and isolation tests
+        env:
+          SECRET_KEY: ci-secret-key-not-used-for-anything-real
+        run: python -m pytest tests -q -m security
+
+      - name: Regression tests for existing MO capabilities
+        env:
+          SECRET_KEY: ci-secret-key-not-used-for-anything-real
+        run: python -m pytest tests -q -m regression
+
+      - name: Dependency vulnerability scan
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt || echo "::warning::pip-audit reported findings"
+
+      - name: Secret scan on the diff
+        run: |
+          if git log -p -1 | grep -nE "(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16})"; then
+            echo "::error::A credential-shaped literal appears in this change"
+            exit 1
+          fi
+          echo "No credential literals found."
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend

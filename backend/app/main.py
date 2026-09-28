@@ -62,7 +62,10 @@ with SessionLocal() as _seed_db:
     if _n:
         logger.info("Seeded %d dropship directory entries", _n)
 
+from .legacy_gate import legacy_gate  # noqa: E402
+
 app = FastAPI(
+    dependencies=[Depends(legacy_gate)],
     title="EZ-NEXUS AI Platform",
     description="Your AI Workforce for Business Growth™",
     version="1.0.0",
@@ -82,6 +85,37 @@ app.add_middleware(
 
 # Mount sub-routers
 app.include_router(auth_router)
+from .api.sso import router as _sso_router  # noqa: E402
+app.include_router(_sso_router)
+
+# ── MO NEXUS OMEGA control plane ─────────────────────────────────────────────
+# Mounted additively under /api/mo. Every legacy route above is untouched.
+# These routers are authenticated by construction (see mo.security.zero_trust);
+# tests/security/test_zero_trust_coverage.py fails the build if any MO route
+# becomes reachable anonymously.
+from .api import builder as _mo_builder          # noqa: E402
+from .api import mo_core as _mo_core             # noqa: E402
+from .api import platform as _mo_platform        # noqa: E402
+from .api import authority as _mo_authority      # noqa: E402
+from .api import voice as _mo_voice              # noqa: E402
+
+for _mo_router in _mo_core.ALL_ROUTERS + _mo_builder.ALL_ROUTERS + _mo_voice.ALL_ROUTERS \
+        + _mo_platform.ALL_ROUTERS + _mo_authority.ALL_ROUTERS:
+    app.include_router(_mo_router)
+logger.info("MO control plane mounted at /api/mo")
+
+
+@app.on_event("startup")
+def _recover_background_runs() -> None:
+    from .database import SessionLocal
+    from .mo.orchestration.background import recover_interrupted
+    db = SessionLocal()
+    try:
+        n = recover_interrupted(db)
+        if n:
+            logger.warning("Marked %d interrupted background run(s) FAILED so they can be resumed.", n)
+    finally:
+        db.close()
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
@@ -879,6 +913,10 @@ def mark_all_alerts_read(db: Session = Depends(get_db)):
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    from .auth import decode_token as _decode
+    if not _decode(websocket.query_params.get("token", "")):
+        await websocket.close(code=1008)          # policy violation: no valid token
+        return
     await hub.connect(websocket, client_id)
     try:
         while True:

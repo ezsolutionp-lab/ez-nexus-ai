@@ -218,3 +218,11 @@ Point `/api` and `/ws` proxies to the FastAPI server.
 ---
 
 *EZ-NEXUS AI — Your AI Workforce for Business Growth™*
+
+## Open in VS Code
+
+Open `ez-nexus-ai.code-workspace` (File > Open Workspace from File). VS Code will offer the recommended Python extensions.
+Then use **Terminal > Run Task**: *Backend: install dependencies*, *Backend: migrate database*, *Frontend: install dependencies*,
+then *Run everything (backend + frontend)*. *Tests: all* runs the test suite, and **Run and Debug** has a backend debug
+configuration. The first backend start writes a generated admin password to `backend/.initial_admin_password` (or set
+`DEFAULT_ADMIN_PASSWORD`).

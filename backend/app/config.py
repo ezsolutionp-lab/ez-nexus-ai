@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440  # 24 hours
 
-    # Default admin seed (change password after first login!)
+    # Admin seed. No password is committed: set DEFAULT_ADMIN_PASSWORD, or one is generated on first start
+    # and written (mode 0600) to `initial_admin_password_file`. Change it after first login.
     default_admin_email: str = "ez.nexusai@gmail.com"
-    default_admin_password: str = "Commander@2024!"
+    default_admin_password: Optional[str] = None
+    initial_admin_password_file: str = "./.initial_admin_password"
 
     # Document processing & OCR
     enable_ocr: bool = True
